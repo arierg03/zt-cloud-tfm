@@ -1,0 +1,85 @@
+services:
+  db:
+    image: postgres:16
+    container_name: events-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: python:3.12-slim
+    container_name: events-api
+    restart: unless-stopped
+    working_dir: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      API_SECRET_KEY: ${API_SECRET_KEY}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./app/api:/app
+    command: >
+      sh -c "
+      if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi &&
+      if [ -f alembic.ini ]; then alembic upgrade head; fi &&
+      if [ -f main.py ]; then uvicorn main:app --host 0.0.0.0 --port 8000 --reload; else
+      echo 'No app/api/main.py yet. Waiting...' && tail -f /dev/null; fi
+      "
+    ports:
+      - "8000:8000"
+
+  web:
+    image: node:20-alpine
+    container_name: events-web
+    restart: unless-stopped
+    working_dir: /app
+    depends_on:
+      - api
+    environment:
+      VITE_API_URL: http://localhost:8000
+    volumes:
+      - ./app/web:/app
+    command: >
+      sh -c "
+      if [ -f package.json ]; then npm install && npm run dev -- --host 0.0.0.0 --port 5173; else
+      echo 'No app/web/package.json yet. Waiting...' && tail -f /dev/null; fi
+      "
+    ports:
+      - "5173:5173"
+
+  # svc:
+  #   image: python:3.12-slim
+  #   container_name: events-svc
+  #   restart: unless-stopped
+  #   working_dir: /app
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: postgresql://events_user:events_pass@db:5432/events
+  #     S3_BUCKET: local-placeholder
+  #     PYTHONUNBUFFERED: "1"
+  #   volumes:
+  #     - ./app/svc:/app
+  #   command: >
+  #     sh -c "
+  #     if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi &&
+  #     if [ -f main.py ]; then python main.py; else
+  #     echo 'No app/svc/main.py yet. Waiting...' && tail -f /dev/null; fi
+  #     "
+
+volumes:
+  db_data:

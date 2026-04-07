@@ -1,0 +1,65 @@
+:root {
+  font-family: "Segoe UI", Arial, sans-serif;
+  line-height: 1.4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f4f5f7;
+  color: #222;
+}
+
+.container {
+  max-width: 960px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.form {
+  display: grid;
+  gap: 0.6rem;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+  padding: 0.6rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+.events {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.events li {
+  display: grid;
+  grid-template-columns: 1fr 120px 100px;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid #eee;
+  border-radius: 6px;
+}
+
+.error {
+  color: #a00000;
+}
