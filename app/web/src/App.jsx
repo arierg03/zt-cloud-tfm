@@ -1,8 +1,242 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const TOKEN_KEY = "events_auth_token";
 const USER_KEY = "events_auth_user";
+const WEEKDAYS = ["L", "M", "X", "J", "V", "S", "D"];
+
+function parseRouteFromHash(hashValue) {
+  const hash = (hashValue || "").replace(/^#/, "") || "/";
+  const detailMatch = hash.match(/^\/events\/(\d+)$/);
+  if (detailMatch) {
+    return { name: "detail", eventId: Number(detailMatch[1]) };
+  }
+  return { name: "home", eventId: null };
+}
+
+function toDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildCalendarCells(monthDate) {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startOffset = (firstDay.getDay() + 6) % 7;
+  const startDate = new Date(year, month, 1 - startOffset);
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const dayDate = new Date(startDate);
+    dayDate.setDate(startDate.getDate() + index);
+    return {
+      key: toDateInputValue(dayDate),
+      value: toDateInputValue(dayDate),
+      day: dayDate.getDate(),
+      isCurrentMonth: dayDate.getMonth() === month,
+      isToday: toDateInputValue(dayDate) === toDateInputValue(new Date()),
+    };
+  });
+}
+
+function formatEventDateTime(value) {
+  if (!value) return "Sin fecha";
+  const date = new Date(value);
+  return new Intl.DateTimeFormat("es-ES", {
+    dateStyle: "full",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function toTimeInputValue(date) {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function eventToForm(event) {
+  if (!event) {
+    return {
+      title: "",
+      manual_description: "",
+      event_date: "",
+      event_time: "19:00",
+      country: "Spain",
+      language: "es",
+    };
+  }
+
+  if (!event.event_date) {
+    return {
+      title: event.title || "",
+      manual_description: event.manual_description || "",
+      event_date: "",
+      event_time: "19:00",
+      country: event.country || "",
+      language: event.language || "es",
+    };
+  }
+
+  const date = new Date(event.event_date);
+  return {
+    title: event.title || "",
+    manual_description: event.manual_description || "",
+    event_date: toDateInputValue(date),
+    event_time: toTimeInputValue(date),
+    country: event.country || "",
+    language: event.language || "es",
+  };
+}
+
+function buildEventPayload(form) {
+  const payload = {
+    title: form.title.trim(),
+    manual_description: form.manual_description.trim() || null,
+    country: form.country.trim() || null,
+    language: form.language.trim() || null,
+    event_date: null,
+  };
+
+  if (form.event_date) {
+    payload.event_date = `${form.event_date}T${form.event_time || "00:00"}:00`;
+  }
+
+  return payload;
+}
+
+function CalendarPicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [monthCursor, setMonthCursor] = useState(() => {
+    if (value) return new Date(`${value}T00:00:00`);
+    return new Date();
+  });
+  const wrapperRef = useRef(null);
+  const calendarCells = useMemo(() => buildCalendarCells(monthCursor), [monthCursor]);
+
+  useEffect(() => {
+    if (!value) return;
+    setMonthCursor(new Date(`${value}T00:00:00`));
+  }, [value]);
+
+  useEffect(() => {
+    function handleOutsideClick(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  const monthTitle = new Intl.DateTimeFormat("es-ES", {
+    month: "long",
+    year: "numeric",
+  }).format(monthCursor);
+
+  const selectedLabel = value
+    ? new Intl.DateTimeFormat("es-ES", { dateStyle: "full" }).format(new Date(`${value}T00:00:00`))
+    : "Selecciona una fecha";
+
+  return (
+    <div className="calendar-picker" ref={wrapperRef}>
+      <button
+        type="button"
+        className="calendar-trigger"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <span>{selectedLabel}</span>
+        <span className="calendar-trigger-icon">{open ? "^" : "v"}</span>
+      </button>
+
+      {open && (
+        <div className="calendar-popover">
+          <div className="calendar-header">
+            <button
+              type="button"
+              className="calendar-nav"
+              onClick={() =>
+                setMonthCursor(
+                  (prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
+                )
+              }
+            >
+              {"<"}
+            </button>
+            <strong>{monthTitle}</strong>
+            <button
+              type="button"
+              className="calendar-nav"
+              onClick={() =>
+                setMonthCursor(
+                  (prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
+                )
+              }
+            >
+              {">"}
+            </button>
+          </div>
+
+          <div className="calendar-weekdays">
+            {WEEKDAYS.map((day) => (
+              <span key={day}>{day}</span>
+            ))}
+          </div>
+
+          <div className="calendar-grid">
+            {calendarCells.map((cell) => {
+              const isSelected = value === cell.value;
+              return (
+                <button
+                  key={cell.key}
+                  type="button"
+                  className={[
+                    "calendar-day",
+                    cell.isCurrentMonth ? "" : "calendar-day-muted",
+                    cell.isToday ? "calendar-day-today" : "",
+                    isSelected ? "calendar-day-selected" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  onClick={() => {
+                    onChange(cell.value);
+                    setOpen(false);
+                  }}
+                >
+                  {cell.day}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="calendar-actions">
+            <button
+              type="button"
+              onClick={() => {
+                onChange(toDateInputValue(new Date()));
+                setOpen(false);
+              }}
+            >
+              Hoy
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+              }}
+            >
+              Limpiar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function App() {
   function loadStoredUser() {
@@ -32,14 +266,35 @@ export default function App() {
     email: "",
     password: "",
   });
+  const [route, setRoute] = useState(() => parseRouteFromHash(window.location.hash));
   const [registerError, setRegisterError] = useState("");
   const [registerLoading, setRegisterLoading] = useState(false);
   const [form, setForm] = useState({
     title: "",
     manual_description: "",
+    event_date: "",
+    event_time: "19:00",
     country: "Spain",
     language: "es",
   });
+  const [detailEvent, setDetailEvent] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState(eventToForm(null));
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [detailActionError, setDetailActionError] = useState("");
+  const [detailActionMessage, setDetailActionMessage] = useState("");
+
+  useEffect(() => {
+    function onHashChange() {
+      setRoute(parseRouteFromHash(window.location.hash));
+    }
+
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   async function apiFetch(path, options = {}) {
     const headers = {
@@ -140,21 +395,137 @@ export default function App() {
   async function onSubmit(e) {
     e.preventDefault();
     setError("");
+    const payload = buildEventPayload(form);
+
     try {
       const res = await apiFetch("/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       if (res.status === 401) {
         logout();
         throw new Error("Sesion expirada. Inicia sesion otra vez.");
       }
       if (!res.ok) throw new Error(`Error ${res.status}`);
-      setForm({ title: "", manual_description: "", country: "Spain", language: "es" });
+      setForm({
+        title: "",
+        manual_description: "",
+        event_date: "",
+        event_time: "19:00",
+        country: "Spain",
+        language: "es",
+      });
       await loadEvents();
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function loadEventDetail(eventId) {
+    setDetailLoading(true);
+    setDetailError("");
+    setDetailActionError("");
+    setDetailActionMessage("");
+    setDetailEvent(null);
+    try {
+      const res = await apiFetch(`/events/${eventId}`);
+      if (res.status === 401) {
+        logout();
+        throw new Error("Sesion expirada. Inicia sesion otra vez.");
+      }
+      if (res.status === 404) throw new Error("Evento no encontrado");
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const data = await res.json();
+      setDetailEvent(data);
+      setEditForm(eventToForm(data));
+    } catch (err) {
+      setDetailError(err.message);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!token) return;
+    if (route.name !== "detail" || !route.eventId) return;
+    loadEventDetail(route.eventId);
+  }, [route, token]);
+
+  useEffect(() => {
+    if (route.name !== "detail") {
+      setEditMode(false);
+      setDetailActionError("");
+      setDetailActionMessage("");
+    }
+  }, [route]);
+
+  function goTo(path) {
+    window.location.hash = path;
+  }
+
+  async function onUpdateEvent(e) {
+    e.preventDefault();
+    if (!route.eventId) return;
+
+    setDetailActionError("");
+    setDetailActionMessage("");
+    setUpdateLoading(true);
+    try {
+      const res = await apiFetch(`/events/${route.eventId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildEventPayload(editForm)),
+      });
+
+      if (res.status === 401) {
+        logout();
+        throw new Error("Sesion expirada. Inicia sesion otra vez.");
+      }
+      if (res.status === 403) throw new Error("No tienes permisos para editar este evento.");
+      if (res.status === 404) throw new Error("Evento no encontrado.");
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+
+      const updated = await res.json();
+      setDetailEvent(updated);
+      setEditForm(eventToForm(updated));
+      setEditMode(false);
+      setDetailActionMessage("Evento actualizado.");
+      await loadEvents();
+    } catch (err) {
+      setDetailActionError(err.message);
+    } finally {
+      setUpdateLoading(false);
+    }
+  }
+
+  async function onDeleteEvent() {
+    if (!route.eventId) return;
+    const confirmed = window.confirm("Quieres eliminar este evento? Esta accion no se puede deshacer.");
+    if (!confirmed) return;
+
+    setDetailActionError("");
+    setDetailActionMessage("");
+    setDeleteLoading(true);
+    try {
+      const res = await apiFetch(`/events/${route.eventId}`, {
+        method: "DELETE",
+      });
+
+      if (res.status === 401) {
+        logout();
+        throw new Error("Sesion expirada. Inicia sesion otra vez.");
+      }
+      if (res.status === 403) throw new Error("No tienes permisos para eliminar este evento.");
+      if (res.status === 404) throw new Error("Evento no encontrado.");
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+
+      await loadEvents();
+      goTo("/");
+    } catch (err) {
+      setDetailActionError(err.message);
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
@@ -253,6 +624,16 @@ export default function App() {
                   setForm((prev) => ({ ...prev, manual_description: e.target.value }))
                 }
               />
+              <label className="field-label">Fecha del evento</label>
+              <CalendarPicker
+                value={form.event_date}
+                onChange={(newDate) => setForm((prev) => ({ ...prev, event_date: newDate }))}
+              />
+              <input
+                type="time"
+                value={form.event_time}
+                onChange={(e) => setForm((prev) => ({ ...prev, event_time: e.target.value }))}
+              />
               <input
                 placeholder="Pais"
                 value={form.country}
@@ -267,21 +648,140 @@ export default function App() {
             </form>
           </section>
 
-          <section className="card">
-            <h2>Eventos</h2>
-            {loading && <p>Cargando...</p>}
-            {error && <p className="error">{error}</p>}
-            {!loading && !events.length && <p>No hay eventos todavia.</p>}
-            <ul className="events">
-              {events.map((event) => (
-                <li key={event.id}>
-                  <strong>{event.title}</strong>
-                  <span>{event.country || "-"}</span>
-                  <span>{event.status}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+          {route.name === "home" && (
+            <section className="card">
+              <h2>Eventos</h2>
+              {loading && <p>Cargando...</p>}
+              {error && <p className="error">{error}</p>}
+              {!loading && !events.length && <p>No hay eventos todavia.</p>}
+              <ul className="events">
+                {events.map((event) => (
+                  <li key={event.id}>
+                    <div className="event-main">
+                      <strong>{event.title}</strong>
+                      <span>{formatEventDateTime(event.event_date)}</span>
+                    </div>
+                    <span>{event.country || "-"}</span>
+                    <span>{event.status}</span>
+                    <button type="button" onClick={() => goTo(`/events/${event.id}`)}>
+                      Ver detalle
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {route.name === "detail" && (
+            <section className="card event-detail">
+              <div className="event-detail-header">
+                <h2>Detalle del evento</h2>
+                <button type="button" onClick={() => goTo("/")}>
+                  Volver a la lista
+                </button>
+              </div>
+              <div className="detail-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditMode((prev) => !prev);
+                    setDetailActionError("");
+                    setDetailActionMessage("");
+                    if (!editMode) setEditForm(eventToForm(detailEvent));
+                  }}
+                  disabled={!detailEvent || detailLoading || deleteLoading}
+                >
+                  {editMode ? "Cancelar edicion" : "Editar evento"}
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={onDeleteEvent}
+                  disabled={!detailEvent || detailLoading || deleteLoading || updateLoading}
+                >
+                  {deleteLoading ? "Eliminando..." : "Eliminar evento"}
+                </button>
+              </div>
+
+              {detailLoading && <p>Cargando detalle...</p>}
+              {detailError && <p className="error">{detailError}</p>}
+              {detailActionError && <p className="error">{detailActionError}</p>}
+              {detailActionMessage && <p className="success">{detailActionMessage}</p>}
+              {!detailLoading && !detailError && detailEvent && (
+                <dl className="event-detail-grid">
+                  <div>
+                    <dt>Titulo</dt>
+                    <dd>{detailEvent.title}</dd>
+                  </div>
+                  <div>
+                    <dt>Fecha</dt>
+                    <dd>{formatEventDateTime(detailEvent.event_date)}</dd>
+                  </div>
+                  <div>
+                    <dt>Pais</dt>
+                    <dd>{detailEvent.country || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Idioma</dt>
+                    <dd>{detailEvent.language || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Estado</dt>
+                    <dd>{detailEvent.status}</dd>
+                  </div>
+                  <div>
+                    <dt>Creado</dt>
+                    <dd>{formatEventDateTime(detailEvent.created_at)}</dd>
+                  </div>
+                  <div className="event-detail-description">
+                    <dt>Descripcion</dt>
+                    <dd>{detailEvent.manual_description || "Sin descripcion"}</dd>
+                  </div>
+                </dl>
+              )}
+              {!detailLoading && !detailError && detailEvent && editMode && (
+                <form className="form detail-edit-form" onSubmit={onUpdateEvent}>
+                  <h3>Editar evento</h3>
+                  <input
+                    required
+                    placeholder="Titulo"
+                    value={editForm.title}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, title: e.target.value }))}
+                  />
+                  <textarea
+                    placeholder="Descripcion"
+                    value={editForm.manual_description}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, manual_description: e.target.value }))
+                    }
+                  />
+                  <label className="field-label">Fecha del evento</label>
+                  <CalendarPicker
+                    value={editForm.event_date}
+                    onChange={(newDate) => setEditForm((prev) => ({ ...prev, event_date: newDate }))}
+                  />
+                  <input
+                    type="time"
+                    value={editForm.event_time}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, event_time: e.target.value }))}
+                  />
+                  <input
+                    placeholder="Pais"
+                    value={editForm.country}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, country: e.target.value }))}
+                  />
+                  <input
+                    placeholder="Idioma"
+                    value={editForm.language}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, language: e.target.value }))}
+                  />
+                  <button type="submit" disabled={updateLoading || deleteLoading}>
+                    {updateLoading ? "Guardando..." : "Guardar cambios"}
+                  </button>
+                </form>
+              )}
+            </section>
+          )}
         </>
       )}
     </main>

@@ -84,6 +84,10 @@ def get_current_user(
     return user
 
 
+def can_manage_event(user: User, event: Event) -> bool:
+    return user.role == "admin" or event.created_by == user.id
+
+
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     try:
@@ -179,6 +183,59 @@ def list_events(
     _: User = Depends(get_current_user),
 ):
     return db.query(Event).order_by(Event.created_at.desc()).all()
+
+
+@app.get("/events/{event_id}", response_model=EventRead)
+def get_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    return event
+
+
+@app.put("/events/{event_id}", response_model=EventRead)
+def update_event(
+    event_id: int,
+    payload: EventCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    if not can_manage_event(current_user, event):
+        raise HTTPException(status_code=403, detail="No tienes permisos para editar este evento")
+
+    event.title = payload.title
+    event.manual_description = payload.manual_description
+    event.event_date = payload.event_date
+    event.country = payload.country
+    event.language = payload.language
+    event.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@app.delete("/events/{event_id}")
+def delete_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    if not can_manage_event(current_user, event):
+        raise HTTPException(status_code=403, detail="No tienes permisos para eliminar este evento")
+
+    db.delete(event)
+    db.commit()
+    return {"message": "deleted"}
 
 
 @app.post("/events", status_code=201)
