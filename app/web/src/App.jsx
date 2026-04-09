@@ -286,6 +286,13 @@ export default function App() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [detailActionError, setDetailActionError] = useState("");
   const [detailActionMessage, setDetailActionMessage] = useState("");
+  const [eventImages, setEventImages] = useState([]);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageUploadLoading, setImageUploadLoading] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const [selectedImageFile, setSelectedImageFile] = useState(null);
+  const [selectedImagePreview, setSelectedImagePreview] = useState("");
+  const [imageCaption, setImageCaption] = useState("");
 
   useEffect(() => {
     function onHashChange() {
@@ -439,10 +446,33 @@ export default function App() {
       const data = await res.json();
       setDetailEvent(data);
       setEditForm(eventToForm(data));
+      await loadEventImages(eventId);
     } catch (err) {
       setDetailError(err.message);
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  async function loadEventImages(eventId) {
+    setImageLoading(true);
+    setImageError("");
+    try {
+      const res = await apiFetch(`/events/${eventId}/images`);
+      if (res.status === 401) {
+        logout();
+        throw new Error("Sesion expirada. Inicia sesion otra vez.");
+      }
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const data = await res.json();
+      setEventImages(Array.isArray(data) ? data : []);
+      setImageCaption("");
+    } catch (err) {
+      setEventImages([]);
+      setImageCaption("");
+      setImageError(err.message);
+    } finally {
+      setImageLoading(false);
     }
   }
 
@@ -457,8 +487,23 @@ export default function App() {
       setEditMode(false);
       setDetailActionError("");
       setDetailActionMessage("");
+      setEventImages([]);
+      setImageError("");
+      setSelectedImageFile(null);
+      setSelectedImagePreview("");
+      setImageCaption("");
     }
   }, [route]);
+
+  useEffect(() => {
+    if (!selectedImageFile) {
+      setSelectedImagePreview("");
+      return;
+    }
+    const objectUrl = URL.createObjectURL(selectedImageFile);
+    setSelectedImagePreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [selectedImageFile]);
 
   function goTo(path) {
     window.location.hash = path;
@@ -528,6 +573,47 @@ export default function App() {
       setDeleteLoading(false);
     }
   }
+
+  async function onUploadImage(e) {
+    e.preventDefault();
+    if (!route.eventId || !selectedImageFile) return;
+
+    setImageError("");
+    setImageUploadLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedImageFile);
+      if (imageCaption.trim()) formData.append("caption", imageCaption.trim());
+
+      const res = await apiFetch(`/events/${route.eventId}/image`, {
+        method: "POST",
+        body: formData,
+      });
+      if (res.status === 401) {
+        logout();
+        throw new Error("Sesion expirada. Inicia sesion otra vez.");
+      }
+      if (res.status === 403) {
+        throw new Error("Solo el creador del evento puede subir imagen.");
+      }
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Error ${res.status}`);
+      }
+
+      const data = await res.json();
+      setEventImages((prev) => [data, ...prev]);
+      setSelectedImageFile(null);
+      setSelectedImagePreview("");
+      setImageCaption(data.caption || "");
+    } catch (err) {
+      setImageError(err.message);
+    } finally {
+      setImageUploadLoading(false);
+    }
+  }
+
+  const isImageUploader = Boolean(detailEvent && currentUser && detailEvent.created_by === currentUser.id);
 
   return (
     <main className="container">
@@ -738,6 +824,54 @@ export default function App() {
                     <dd>{detailEvent.manual_description || "Sin descripcion"}</dd>
                   </div>
                 </dl>
+              )}
+              {!detailLoading && !detailError && detailEvent && (
+                <section className="event-image-section">
+                  <h3>Imagen del evento</h3>
+                  {imageLoading && <p>Cargando imagen...</p>}
+                  {imageError && <p className="error">{imageError}</p>}
+                  {!imageLoading && !eventImages.length && <p>No hay imagenes subidas.</p>}
+                  {!imageLoading && eventImages.length > 0 && (
+                    <div className="event-image-grid">
+                      {eventImages.map((image) => (
+                        <article className="event-image-card" key={image.id}>
+                          <div className="event-image-preview">
+                            <img src={image.image_url} alt={image.caption || `Imagen de ${detailEvent.title}`} />
+                          </div>
+                          {image.caption && <p className="event-image-caption">{image.caption}</p>}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+
+                  {isImageUploader && (
+                    <form className="form image-upload-form" onSubmit={onUploadImage}>
+                      <label className="field-label">Subir imagen (JPG, PNG, WEBP, max 5 MB)</label>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(e) => setSelectedImageFile(e.target.files?.[0] || null)}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Caption de la imagen"
+                        value={imageCaption}
+                        onChange={(e) => setImageCaption(e.target.value)}
+                      />
+                      {selectedImagePreview && (
+                        <div className="event-image-preview pending">
+                          <img src={selectedImagePreview} alt="Previsualizacion antes de subir" />
+                        </div>
+                      )}
+                      <button type="submit" disabled={!selectedImageFile || imageUploadLoading}>
+                        {imageUploadLoading ? "Subiendo..." : "Guardar imagen"}
+                      </button>
+                    </form>
+                  )}
+                  {!isImageUploader && (
+                    <p className="muted">Solo la persona que creo el evento puede subir imagenes.</p>
+                  )}
+                </section>
               )}
               {!detailLoading && !detailError && detailEvent && editMode && (
                 <form className="form detail-edit-form" onSubmit={onUpdateEvent}>

@@ -44,7 +44,21 @@ class EventRead(BaseModel):
     country: str | None
     language: str | None
     status: str
+    created_by: int
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ImageRead(BaseModel):
+    id: int
+    event_id: int
+    filename: str
+    mime_type: str
+    caption: str | None
+    created_at: datetime
+    image_url: str
 
     class Config:
         from_attributes = True

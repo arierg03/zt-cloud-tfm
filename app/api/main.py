@@ -1,16 +1,22 @@
+import hashlib
+from io import BytesIO
 from datetime import datetime, timezone
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
+from botocore.exceptions import BotoCoreError, ClientError
+from PIL import Image as PILImage, UnidentifiedImageError
 from sqlalchemy import text
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from auth import create_access_token, decode_access_token, hash_password, verify_password
 from database import SessionLocal
-from models import Event, User
-from schemas import EventCreate, EventRead, LoginRequest, LoginResponse, RegisterRequest, UserPublic
+from models import Event, Image, User
+from schemas import EventCreate, EventRead, ImageRead, LoginRequest, LoginResponse, RegisterRequest, UserPublic
+from storage import S3_BUCKET, build_presigned_get_url, ensure_bucket_exists, get_s3_client
 
 
 app = FastAPI(title="Events API", version="0.1.0")
@@ -24,6 +30,8 @@ app.add_middleware(
 )
 
 security = HTTPBearer(auto_error=False)
+ALLOWED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 
 def get_db():
@@ -86,6 +94,56 @@ def get_current_user(
 
 def can_manage_event(user: User, event: Event) -> bool:
     return user.role == "admin" or event.created_by == user.id
+
+
+def is_event_creator(user: User, event: Event) -> bool:
+    return event.created_by == user.id
+
+
+def latest_event_image(db: Session, event_id: int) -> Image | None:
+    return (
+        db.query(Image)
+        .filter(Image.event_id == event_id)
+        .order_by(Image.created_at.desc(), Image.id.desc())
+        .first()
+    )
+
+
+def serialize_image(image: Image) -> ImageRead:
+    image_url = build_presigned_get_url(image.storage_path)
+    return ImageRead(
+        id=image.id,
+        event_id=image.event_id,
+        filename=image.filename,
+        mime_type=image.mime_type,
+        caption=image.caption,
+        created_at=image.created_at,
+        image_url=image_url,
+    )
+
+
+def delete_image_from_storage(storage_path: str) -> None:
+    try:
+        get_s3_client().delete_object(Bucket=S3_BUCKET, Key=storage_path)
+    except (ClientError, BotoCoreError):
+        # Prefer DB consistency over failing deletes of stale remote objects.
+        pass
+
+
+def extract_dimensions(content: bytes) -> tuple[int | None, int | None]:
+    try:
+        with PILImage.open(BytesIO(content)) as image:
+            return image.width, image.height
+    except (UnidentifiedImageError, OSError):
+        return None, None
+
+
+@app.on_event("startup")
+def ensure_storage_bucket():
+    try:
+        ensure_bucket_exists()
+    except Exception as exc:
+        print(f"[startup] warning: could not ensure bucket {S3_BUCKET}: {exc}")
 
 
 @app.get("/health")
@@ -257,3 +315,112 @@ def create_event(
     db.refresh(event)
 
     return {"id": event.id, "message": "created"}
+
+
+@app.get("/events/{event_id}/image", response_model=ImageRead)
+def get_event_image(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+
+    image = latest_event_image(db, event_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Imagen no encontrada")
+
+    try:
+        return serialize_image(image)
+    except (ClientError, BotoCoreError) as exc:
+        raise HTTPException(status_code=503, detail=f"Error generando URL de imagen: {exc}") from exc
+
+
+@app.get("/events/{event_id}/images", response_model=list[ImageRead])
+def list_event_images(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+
+    images = (
+        db.query(Image)
+        .filter(Image.event_id == event_id)
+        .order_by(Image.created_at.desc(), Image.id.desc())
+        .all()
+    )
+    try:
+        return [serialize_image(image) for image in images]
+    except (ClientError, BotoCoreError) as exc:
+        raise HTTPException(status_code=503, detail=f"Error generando URL de imagen: {exc}") from exc
+
+
+@app.post("/events/{event_id}/image", response_model=ImageRead, status_code=201)
+async def upload_event_image(
+    event_id: int,
+    file: UploadFile = File(...),
+    caption: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    if not is_event_creator(current_user, event):
+        raise HTTPException(status_code=403, detail="Solo el creador del evento puede subir imagen")
+
+    mime_type = (file.content_type or "").lower()
+    if mime_type not in ALLOWED_IMAGE_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="Formato de imagen no permitido (usa JPG, PNG o WEBP)")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Imagen vacia")
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="La imagen supera 5 MB")
+
+    extension_by_mime = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+    }
+    extension = extension_by_mime[mime_type]
+    storage_path = f"events/{event_id}/{uuid4().hex}.{extension}"
+    file_hash = hashlib.sha256(content).hexdigest()
+    width, height = extract_dimensions(content)
+    normalized_caption = (caption or "").strip() or None
+
+    try:
+        client = get_s3_client()
+        client.put_object(
+            Bucket=S3_BUCKET,
+            Key=storage_path,
+            Body=content,
+            ContentType=mime_type,
+        )
+    except (ClientError, BotoCoreError) as exc:
+        raise HTTPException(status_code=503, detail=f"Error subiendo imagen a almacenamiento: {exc}") from exc
+
+    image = Image(
+        event_id=event_id,
+        uploaded_by=current_user.id,
+        storage_path=storage_path,
+        filename=file.filename or f"event-{event_id}.{extension}",
+        mime_type=mime_type,
+        caption=normalized_caption,
+        width=width,
+        height=height,
+        hash=file_hash,
+    )
+    db.add(image)
+    db.commit()
+    db.refresh(image)
+
+    try:
+        return serialize_image(image)
+    except (ClientError, BotoCoreError) as exc:
+        raise HTTPException(status_code=503, detail=f"Error generando URL de imagen: {exc}") from exc
