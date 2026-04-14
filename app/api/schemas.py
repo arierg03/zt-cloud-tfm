@@ -40,10 +40,13 @@ class EventRead(BaseModel):
     id: int
     title: str
     manual_description: str | None
+    generated_description: str | None
     event_date: datetime | None
     country: str | None
     language: str | None
     status: str
+    last_batch_execution_id: int | None
+    processed_at: datetime | None
     created_by: int
     created_at: datetime
 
@@ -59,6 +62,22 @@ class ImageRead(BaseModel):
     caption: str | None
     created_at: datetime
     image_url: str
+
+    class Config:
+        from_attributes = True
+
+
+class BatchExecutionRead(BaseModel):
+    id: int
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    total_events_detected: int
+    total_events_processed: int
+    total_events_failed: int
+    log_summary: str | None
+    error_message: str | None
+    created_at: datetime
 
     class Config:
         from_attributes = True

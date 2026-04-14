@@ -1,4 +1,4 @@
-services:
+﻿services:
   minio:
     image: minio/minio:latest
     container_name: events-minio
@@ -103,26 +103,27 @@ services:
     ports:
       - "5173:5173"
 
-  # svc:
-  #   image: python:3.12-slim
-  #   container_name: events-svc
-  #   restart: unless-stopped
-  #   working_dir: /app
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
-  #   environment:
-  #     DATABASE_URL: postgresql://events_user:events_pass@db:5432/events
-  #     S3_BUCKET: local-placeholder
-  #     PYTHONUNBUFFERED: "1"
-  #   volumes:
-  #     - ./app/svc:/app
-  #   command: >
-  #     sh -c "
-  #     if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi &&
-  #     if [ -f main.py ]; then python main.py; else
-  #     echo 'No app/svc/main.py yet. Waiting...' && tail -f /dev/null; fi
-  #     "
+  svc:
+    image: python:3.12-slim
+    container_name: events-svc
+    restart: unless-stopped
+    working_dir: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      POLL_SECONDS: ${SVC_POLL_SECONDS:-86400}
+      RUN_ONCE: ${SVC_RUN_ONCE:-false}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./app/svc:/app
+    command: >
+      sh -c "
+      if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi &&
+      if [ -f main.py ]; then python main.py; else
+      echo 'No app/svc/main.py yet. Waiting...' && tail -f /dev/null; fi
+      "
 
 volumes:
   db_data:

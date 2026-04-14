@@ -14,8 +14,17 @@ from sqlalchemy.orm import Session
 
 from auth import create_access_token, decode_access_token, hash_password, verify_password
 from database import SessionLocal
-from models import Event, Image, User
-from schemas import EventCreate, EventRead, ImageRead, LoginRequest, LoginResponse, RegisterRequest, UserPublic
+from models import BatchExecution, Event, Image, User
+from schemas import (
+    BatchExecutionRead,
+    EventCreate,
+    EventRead,
+    ImageRead,
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    UserPublic,
+)
 from storage import S3_BUCKET, build_presigned_get_url, ensure_bucket_exists, get_s3_client
 
 
@@ -92,6 +101,11 @@ def get_current_user(
     return user
 
 
+def require_admin(user: User) -> None:
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo admin puede ejecutar el batch manualmente")
+
+
 def can_manage_event(user: User, event: Event) -> bool:
     return user.role == "admin" or event.created_by == user.id
 
@@ -136,6 +150,132 @@ def extract_dimensions(content: bytes) -> tuple[int | None, int | None]:
             return image.width, image.height
     except (UnidentifiedImageError, OSError):
         return None, None
+
+
+def generate_event_description(event: Event, images: list[Image]) -> str:
+    caption_texts = [img.caption.strip() for img in images if img.caption and img.caption.strip()]
+    mime_types = sorted({img.mime_type for img in images if img.mime_type})
+
+    dimensions = [(img.width, img.height) for img in images if img.width is not None and img.height is not None]
+    if dimensions:
+        min_w = min(d[0] for d in dimensions)
+        max_w = max(d[0] for d in dimensions)
+        min_h = min(d[1] for d in dimensions)
+        max_h = max(d[1] for d in dimensions)
+        dimensions_summary = f"resoluciones entre {min_w}x{min_h} y {max_w}x{max_h}"
+    else:
+        dimensions_summary = "resolucion no disponible"
+
+    event_date = event.event_date.isoformat() if event.event_date else "sin fecha definida"
+    country = event.country or "pais no especificado"
+    manual_description = event.manual_description or "sin descripcion manual"
+    captions_summary = "; ".join(caption_texts[:5]) if caption_texts else "sin captions"
+    mime_summary = ", ".join(mime_types) if mime_types else "tipo no especificado"
+    language = (event.language or "es").lower()
+
+    if language.startswith("en"):
+        return (
+            f"Event '{event.title}' ({country}, {event_date}). "
+            f"Manual description: {manual_description}. "
+            f"The batch analyzed {len(images)} image(s) with formats {mime_summary}, {dimensions_summary}. "
+            f"Main visual notes from captions: {captions_summary}."
+        )
+
+    return (
+        f"Evento '{event.title}' ({country}, {event_date}). "
+        f"Descripcion manual: {manual_description}. "
+        f"El batch analizo {len(images)} imagen(es) con formatos {mime_summary}, {dimensions_summary}. "
+        f"Observaciones visuales principales segun captions: {captions_summary}."
+    )
+
+
+def run_batch_processing(db: Session) -> BatchExecution:
+    running = db.query(BatchExecution).filter(BatchExecution.status == "running").first()
+    if running:
+        raise HTTPException(status_code=409, detail="Ya hay una ejecucion batch en curso")
+
+    now = datetime.now(timezone.utc)
+    batch = BatchExecution(
+        started_at=now,
+        status="running",
+        total_events_detected=0,
+        total_events_processed=0,
+        total_events_failed=0,
+    )
+    db.add(batch)
+    db.flush()
+
+    events = (
+        db.query(Event)
+        .filter(
+            db.query(Image.id).filter(Image.event_id == Event.id).exists(),
+            or_(
+                Event.processed_at.is_(None),
+                db.query(Image.id)
+                .filter(
+                    Image.event_id == Event.id,
+                    Event.processed_at.is_not(None),
+                    Image.created_at > Event.processed_at,
+                )
+                .exists(),
+            ),
+        )
+        .order_by(Event.created_at.asc())
+        .all()
+    )
+
+    total_detected = len(events)
+    total_processed = 0
+    total_failed = 0
+    errors: list[str] = []
+
+    for event in events:
+        try:
+            images = (
+                db.query(Image)
+                .filter(Image.event_id == event.id)
+                .order_by(Image.created_at.asc(), Image.id.asc())
+                .all()
+            )
+            generated = generate_event_description(event, images)
+            processed_at = datetime.now(timezone.utc)
+
+            event.generated_description = generated
+            event.last_batch_execution_id = batch.id
+            event.processed_at = processed_at
+            event.status = "processed"
+            event.updated_at = processed_at
+            total_processed += 1
+        except Exception as event_exc:
+            event.status = "processing_failed"
+            event.updated_at = datetime.now(timezone.utc)
+            total_failed += 1
+            errors.append(f"event_id={event.id}: {event_exc}")
+
+    if total_detected == 0:
+        final_status = "no_events"
+    elif total_processed > 0 and total_failed > 0:
+        final_status = "partial_success"
+    elif total_processed == 0 and total_failed > 0:
+        final_status = "failed"
+    else:
+        final_status = "success"
+
+    batch.finished_at = datetime.now(timezone.utc)
+    batch.status = final_status
+    batch.total_events_detected = total_detected
+    batch.total_events_processed = total_processed
+    batch.total_events_failed = total_failed
+    batch.log_summary = (
+        f"Eventos detectados: {total_detected}. "
+        f"Procesados correctamente: {total_processed}. "
+        f"Fallidos: {total_failed}."
+    )
+    batch.error_message = " | ".join(errors[:10]) if errors else None
+
+    db.commit()
+    db.refresh(batch)
+    return batch
 
 
 @app.on_event("startup")
@@ -424,3 +564,45 @@ async def upload_event_image(
         return serialize_image(image)
     except (ClientError, BotoCoreError) as exc:
         raise HTTPException(status_code=503, detail=f"Error generando URL de imagen: {exc}") from exc
+
+
+@app.get("/batch/executions", response_model=list[BatchExecutionRead])
+def list_batch_executions(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    safe_limit = max(1, min(limit, 100))
+    return db.query(BatchExecution).order_by(BatchExecution.started_at.desc()).limit(safe_limit).all()
+
+
+@app.get("/batch/executions/{batch_id}", response_model=BatchExecutionRead)
+def get_batch_execution(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    batch = db.get(BatchExecution, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Ejecucion batch no encontrada")
+    return batch
+
+
+@app.get("/batch/status", response_model=BatchExecutionRead)
+def get_latest_batch_status(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    latest = db.query(BatchExecution).order_by(BatchExecution.started_at.desc()).first()
+    if not latest:
+        raise HTTPException(status_code=404, detail="No hay ejecuciones batch todavia")
+    return latest
+
+
+@app.post("/batch/run", response_model=BatchExecutionRead)
+def run_batch_now(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_admin(current_user)
+    return run_batch_processing(db)

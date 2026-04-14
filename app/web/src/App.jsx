@@ -50,6 +50,17 @@ function formatEventDateTime(value) {
   }).format(date);
 }
 
+function formatBatchStatus(status) {
+  const labels = {
+    success: "Exito",
+    partial_success: "Parcial",
+    failed: "Fallido",
+    running: "En curso",
+    no_events: "Sin eventos",
+  };
+  return labels[status] || status;
+}
+
 function toTimeInputValue(date) {
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
@@ -293,6 +304,13 @@ export default function App() {
   const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [selectedImagePreview, setSelectedImagePreview] = useState("");
   const [imageCaption, setImageCaption] = useState("");
+  const [batchRunLoading, setBatchRunLoading] = useState(false);
+  const [batchRunMessage, setBatchRunMessage] = useState("");
+  const [batchRunError, setBatchRunError] = useState("");
+  const [batchStatus, setBatchStatus] = useState(null);
+  const [batchHistory, setBatchHistory] = useState([]);
+  const [batchStatusLoading, setBatchStatusLoading] = useState(false);
+  const [batchStatusError, setBatchStatusError] = useState("");
 
   useEffect(() => {
     function onHashChange() {
@@ -338,6 +356,54 @@ export default function App() {
 
   useEffect(() => {
     loadEvents();
+  }, [token]);
+
+  async function loadBatchState() {
+    if (!token) {
+      setBatchStatus(null);
+      setBatchHistory([]);
+      setBatchStatusError("");
+      return;
+    }
+
+    setBatchStatusLoading(true);
+    setBatchStatusError("");
+    try {
+      const [statusRes, historyRes] = await Promise.all([
+        apiFetch("/batch/status"),
+        apiFetch("/batch/executions?limit=10"),
+      ]);
+
+      if (statusRes.status === 401 || historyRes.status === 401) {
+        logout();
+        throw new Error("Sesion expirada. Inicia sesion otra vez.");
+      }
+
+      if (statusRes.status === 404) {
+        setBatchStatus(null);
+      } else if (!statusRes.ok) {
+        throw new Error(`Error ${statusRes.status}`);
+      } else {
+        setBatchStatus(await statusRes.json());
+      }
+
+      if (historyRes.status === 404) {
+        setBatchHistory([]);
+      } else if (!historyRes.ok) {
+        throw new Error(`Error ${historyRes.status}`);
+      } else {
+        const historyData = await historyRes.json();
+        setBatchHistory(Array.isArray(historyData) ? historyData : []);
+      }
+    } catch (err) {
+      setBatchStatusError(err.message);
+    } finally {
+      setBatchStatusLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadBatchState();
   }, [token]);
 
   async function onLogin(e) {
@@ -395,8 +461,43 @@ export default function App() {
     setToken("");
     setCurrentUser(null);
     setEvents([]);
+    setBatchRunError("");
+    setBatchRunMessage("");
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+  }
+
+  async function onRunBatchNow() {
+    setBatchRunError("");
+    setBatchRunMessage("");
+    setBatchRunLoading(true);
+    try {
+      const res = await apiFetch("/batch/run", { method: "POST" });
+      if (res.status === 401) {
+        logout();
+        throw new Error("Sesion expirada. Inicia sesion otra vez.");
+      }
+      if (res.status === 403) throw new Error("Solo admin puede lanzar el batch manualmente.");
+      if (res.status === 409) throw new Error("Ya hay una ejecucion batch en curso.");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `Error ${res.status}`);
+      }
+
+      const batch = await res.json();
+      setBatchRunMessage(
+        `Batch ${batch.id} completado: detectados ${batch.total_events_detected}, procesados ${batch.total_events_processed}, fallidos ${batch.total_events_failed}.`
+      );
+      await loadEvents();
+      await loadBatchState();
+      if (route.name === "detail" && route.eventId) {
+        await loadEventDetail(route.eventId);
+      }
+    } catch (err) {
+      setBatchRunError(err.message);
+    } finally {
+      setBatchRunLoading(false);
+    }
   }
 
   async function onSubmit(e) {
@@ -686,9 +787,51 @@ export default function App() {
           <p>
             Conectado como <strong>{currentUser?.username}</strong> ({currentUser?.role})
           </p>
+          <button type="button" onClick={onRunBatchNow} disabled={batchRunLoading}>
+            {batchRunLoading ? "Ejecutando batch..." : "Ejecutar batch ahora"}
+          </button>
+          {batchRunError && <p className="error">{batchRunError}</p>}
+          {batchRunMessage && <p className="success">{batchRunMessage}</p>}
           <button type="button" onClick={logout}>
             Cerrar sesion
           </button>
+        </section>
+      )}
+
+      {token && (
+        <section className="card">
+          <h2>Estado batch</h2>
+          {batchStatusLoading && <p>Cargando estado batch...</p>}
+          {batchStatusError && <p className="error">{batchStatusError}</p>}
+          {!batchStatusLoading && !batchStatusError && !batchStatus && (
+            <p>No hay ejecuciones batch todavia.</p>
+          )}
+          {!batchStatusLoading && !batchStatusError && batchStatus && (
+            <div className="batch-latest">
+              <p>
+                Ultima ejecucion #{batchStatus.id} - <strong>{formatBatchStatus(batchStatus.status)}</strong>
+              </p>
+              <p>
+                Detectados: {batchStatus.total_events_detected} | Procesados:{" "}
+                {batchStatus.total_events_processed} | Fallidos: {batchStatus.total_events_failed}
+              </p>
+              <p>Inicio: {formatEventDateTime(batchStatus.started_at)}</p>
+              <p>Fin: {formatEventDateTime(batchStatus.finished_at)}</p>
+            </div>
+          )}
+
+          {!batchStatusLoading && !batchStatusError && batchHistory.length > 0 && (
+            <ul className="batch-history">
+              {batchHistory.map((run) => (
+                <li key={run.id}>
+                  <strong>#{run.id}</strong>
+                  <span>{formatBatchStatus(run.status)}</span>
+                  <span>{formatEventDateTime(run.started_at)}</span>
+                  <span>{run.total_events_processed}/{run.total_events_detected}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
@@ -822,6 +965,19 @@ export default function App() {
                   <div className="event-detail-description">
                     <dt>Descripcion</dt>
                     <dd>{detailEvent.manual_description || "Sin descripcion"}</dd>
+                  </div>
+                  <div className="event-detail-description">
+                    <dt>Descripcion generada</dt>
+                    <dd
+                      className={
+                        detailEvent.generated_description
+                          ? "generated-description"
+                          : "generated-description disabled"
+                      }
+                    >
+                      {detailEvent.generated_description ||
+                        "Pendiente de procesamiento batch para generar metadatos."}
+                    </dd>
                   </div>
                 </dl>
               )}
