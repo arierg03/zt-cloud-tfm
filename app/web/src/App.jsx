@@ -304,9 +304,6 @@ export default function App() {
   const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [selectedImagePreview, setSelectedImagePreview] = useState("");
   const [imageCaption, setImageCaption] = useState("");
-  const [batchRunLoading, setBatchRunLoading] = useState(false);
-  const [batchRunMessage, setBatchRunMessage] = useState("");
-  const [batchRunError, setBatchRunError] = useState("");
   const [batchStatus, setBatchStatus] = useState(null);
   const [batchHistory, setBatchHistory] = useState([]);
   const [batchStatusLoading, setBatchStatusLoading] = useState(false);
@@ -461,43 +458,8 @@ export default function App() {
     setToken("");
     setCurrentUser(null);
     setEvents([]);
-    setBatchRunError("");
-    setBatchRunMessage("");
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-  }
-
-  async function onRunBatchNow() {
-    setBatchRunError("");
-    setBatchRunMessage("");
-    setBatchRunLoading(true);
-    try {
-      const res = await apiFetch("/batch/run", { method: "POST" });
-      if (res.status === 401) {
-        logout();
-        throw new Error("Sesion expirada. Inicia sesion otra vez.");
-      }
-      if (res.status === 403) throw new Error("Solo admin puede lanzar el batch manualmente.");
-      if (res.status === 409) throw new Error("Ya hay una ejecucion batch en curso.");
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || `Error ${res.status}`);
-      }
-
-      const batch = await res.json();
-      setBatchRunMessage(
-        `Batch ${batch.id} completado: detectados ${batch.total_events_detected}, procesados ${batch.total_events_processed}, fallidos ${batch.total_events_failed}.`
-      );
-      await loadEvents();
-      await loadBatchState();
-      if (route.name === "detail" && route.eventId) {
-        await loadEventDetail(route.eventId);
-      }
-    } catch (err) {
-      setBatchRunError(err.message);
-    } finally {
-      setBatchRunLoading(false);
-    }
   }
 
   async function onSubmit(e) {
@@ -787,11 +749,6 @@ export default function App() {
           <p>
             Conectado como <strong>{currentUser?.username}</strong> ({currentUser?.role})
           </p>
-          <button type="button" onClick={onRunBatchNow} disabled={batchRunLoading}>
-            {batchRunLoading ? "Ejecutando batch..." : "Ejecutar batch ahora"}
-          </button>
-          {batchRunError && <p className="error">{batchRunError}</p>}
-          {batchRunMessage && <p className="success">{batchRunMessage}</p>}
           <button type="button" onClick={logout}>
             Cerrar sesion
           </button>
