@@ -1,90 +1,124 @@
 # zt-cloud-tfm
 
-Repositorio del TFM sobre implementacion de un enfoque Zero Trust en entorno cloud.
+Repositorio del TFM sobre un enfoque Zero Trust en entorno cloud.
 
-## Arranque local
+## Stack
 
-1. Crear archivo de entorno a partir del ejemplo:
-   `cp .env.example .env`
-2. Editar `.env` y definir un valor propio para `API_SECRET_KEY`.
-   Tambien puedes ajustar `POSTGRES_DB`, `POSTGRES_USER` y `POSTGRES_PASSWORD`.
-   Para imagenes en local con MinIO, revisa tambien `S3_ENDPOINT` y `S3_PUBLIC_ENDPOINT`.
+- API: FastAPI + SQLAlchemy + Alembic
+- Web: React (Vite)
+- Base de datos: PostgreSQL 16
+- Almacenamiento de imagenes: MinIO (S3 compatible)
+- Proceso batch: servicio `svc` en Python
+- Orquestacion local: Docker Compose
+
+## Arranque rapido (local)
+
+1. Copiar variables de entorno:
+
+```bash
+cp .env.example .env
+```
+
+2. Revisar `.env` y cambiar al menos `API_SECRET_KEY`.
 3. Levantar servicios:
-   `docker compose up --build`
 
-Servicios:
+```bash
+docker compose up --build
+```
+
+4. URLs utiles:
 - API: `http://localhost:8000`
+- Docs Swagger: `http://localhost:8000/docs`
 - Web: `http://localhost:5173`
-- MinIO API (S3 local): `http://localhost:9000`
+- MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
 
-Credenciales MinIO por defecto (local):
-- Access Key: `minioadmin`
-- Secret Key: `minioadmin`
-- Bucket: `events-images`
+Notas:
+- La API aplica migraciones Alembic al arrancar (`alembic upgrade head`).
+- El bucket de MinIO se crea automaticamente con el servicio `minio-init`.
 
-Variables MinIO/S3 usadas en local:
-- `S3_ENDPOINT`: endpoint interno para la API (por defecto `http://minio:9000`)
-- `S3_PUBLIC_ENDPOINT`: endpoint para URLs firmadas accesibles desde navegador (por defecto `http://localhost:9000`)
-- `S3_BUCKET`: bucket de imagenes
-- `S3_REGION`: region de firma
-- `S3_USE_SSL`: `false` en local
-- `S3_URL_TTL_SECONDS`: expiracion de URLs firmadas
+## Seed de datos (opcional pero recomendado)
+
+Carga el admin demo y un evento inicial.
+
+En PowerShell:
+
+```powershell
+Get-Content app/db/seed.sql | docker compose exec -T db psql -U events_user -d events
+```
+
+En bash:
+
+```bash
+docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /dev/stdin < app/db/seed.sql
+```
 
 ## Credenciales de prueba
 
-- Admin demo:
-  - Email: `admin@example.com`
-  - Password: `admin123`
+- Email: `admin@example.com`
+- Password: `admin123`
+
+## Variables de entorno principales
+
+- `API_SECRET_KEY`: clave para firmar y validar tokens de acceso.
+- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`: configuracion de PostgreSQL.
+- `S3_ENDPOINT`: endpoint interno para API/svc (por defecto `http://minio:9000`).
+- `S3_PUBLIC_ENDPOINT`: endpoint publico para URLs firmadas (por defecto `http://localhost:9000`).
+- `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_REGION`, `S3_USE_SSL`.
+- `S3_URL_TTL_SECONDS`: expiracion de URLs firmadas.
+- `SVC_POLL_SECONDS`: intervalo entre ejecuciones del batch.
+- `SVC_RUN_ONCE`: si `true`, ejecuta una vez y termina.
+- `SVC_FORCE_REPROCESS`: si `true`, reprocesa eventos ya procesados.
+
+Consulta `.env.example` para valores de desarrollo.
+
+## Endpoints principales
+
+Auth:
+- `POST /auth/register`
+- `POST /auth/login`
+
+Eventos:
+- `GET /events`
+- `GET /events/{event_id}`
+- `POST /events`
+- `PUT /events/{event_id}`
+- `DELETE /events/{event_id}`
+
+Imagenes:
+- `POST /events/{event_id}/image` (solo creador del evento; `multipart/form-data`)
+- `GET /events/{event_id}/image` (ultima imagen)
+- `GET /events/{event_id}/images` (galeria)
+
+Batch:
+- `GET /batch/status`
+- `GET /batch/executions`
+- `GET /batch/executions/{batch_id}`
+
+Health:
+- `GET /health`
+
+## Servicio batch (`svc`)
+
+El servicio `svc`:
+- Detecta eventos con imagenes.
+- Lee metadatos de BD y de MinIO.
+- Genera `generated_description`.
+- Actualiza `events` (`processed_at`, `last_batch_execution_id`, `status`).
+- Registra cada corrida en `batch_executions`.
+
+Modos de ejecucion:
+- Local continuo: `SVC_RUN_ONCE=false` y `SVC_POLL_SECONDS=<segundos>`
+- Job unico (ideal para CronJob en Kubernetes): `SVC_RUN_ONCE=true`
 
 ## Seguridad minima aplicada
 
-- La clave de firma de tokens (`API_SECRET_KEY`) ya no esta hardcodeada en `docker-compose.yml`.
-- El valor debe venir desde `.env` (que esta ignorado por git).
-- El repositorio incluye solo `.env.example` como plantilla sin secretos reales.
+- `API_SECRET_KEY` no esta hardcodeada en `docker-compose.yml`.
+- Los secretos se leen desde `.env` (ignorado por git).
+- El repo incluye `.env.example` con placeholders de desarrollo.
 
-## Procesamiento batch de eventos
+## Limitaciones conocidas (estado base)
 
-- Servicio `svc` (contenedor `events-svc`):
-  - Ejecuta procesamiento periodico cada `POLL_SECONDS` (configurado por `SVC_POLL_SECONDS` en `.env`).
-  - En local puede correr en bucle; en Kubernetes se recomienda ejecutarlo como `CronJob`.
-
-### Local vs CronJob en Kubernetes
-
-- Modo local (contenedor persistente):
-  - `RUN_ONCE=false`
-  - `SVC_POLL_SECONDS=86400` (o el intervalo que quieras)
-  - El proceso queda activo y ejecuta en bucle.
-
-- Modo Kubernetes CronJob (recomendado para diario):
-  - `RUN_ONCE=true`
-  - El contenedor arranca, ejecuta una sola vez y finaliza.
-  - El horario lo define `spec.schedule` del CronJob (por ejemplo una vez al dia).
-  - En este modo, no es necesario usar `SVC_POLL_SECONDS=86400`.
-
-## Imagenes de evento
-
-- Subida:
-  - Endpoint `POST /events/{event_id}/image` (`multipart/form-data`).
-  - Solo el creador del evento puede subir imagenes.
-  - Guarda objeto en MinIO y metadata en `images` (`storage_path`, `hash`, `width`, `height`, `caption`).
-
-- Visualizacion:
-  - Endpoint `GET /events/{event_id}/images`.
-  - Devuelve la galeria de imagenes del evento con URL firmada temporal.
-
-## Batch y metadatos
-
-- Procesamiento:
-  - El `svc` detecta eventos con imagenes pendientes de procesar.
-  - Cada ejecucion se registra en `batch_executions`.
-
-- Metadatos generados:
-  - Genera `generated_description` usando metadatos del evento + imagenes.
-  - Actualiza `events.generated_description`, `events.last_batch_execution_id`, `events.processed_at` y `events.status`.
-
-- Estado del procesamiento:
-  - `GET /batch/status`: ultima ejecucion batch.
-  - `GET /batch/executions`: historial.
-  - `GET /batch/executions/{batch_id}`: detalle.
-  - `POST /batch/run`: lanza ejecucion manual (solo admin).
+- CORS permitido para `http://localhost:5173` (orientado a desarrollo).
+- No hay endpoint API para disparar batch manual; el disparo lo hace `svc` por planificacion.
+- Para produccion faltaria endurecer gestion de secretos, observabilidad y politicas Zero Trust completas.
