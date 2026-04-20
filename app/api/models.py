@@ -42,8 +42,6 @@ class Event(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     manual_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    source_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     event_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     country: Mapped[str | None] = mapped_column(String(100), nullable=True)
     language: Mapped[str | None] = mapped_column(String(50), nullable=True)

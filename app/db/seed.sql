@@ -13,11 +13,10 @@ SET
   role = EXCLUDED.role,
   is_active = EXCLUDED.is_active;
 
-INSERT INTO events (title, manual_description, source_name, event_date, country, language, status, created_by)
+INSERT INTO events (title, manual_description, event_date, country, language, status, created_by)
 SELECT
   'Demo Event',
   'Evento inicial para validar la app',
-  'seed',
   NOW() + INTERVAL '7 days',
   'Spain',
   'es',

@@ -53,8 +53,6 @@ def upgrade() -> None:
         sa.Column("title", sa.String(length=255), nullable=False),
         sa.Column("manual_description", sa.Text(), nullable=True),
         sa.Column("generated_description", sa.Text(), nullable=True),
-        sa.Column("source_url", sa.String(length=500), nullable=True),
-        sa.Column("source_name", sa.String(length=150), nullable=True),
         sa.Column("event_date", sa.DateTime(), nullable=True),
         sa.Column("country", sa.String(length=100), nullable=True),
         sa.Column("language", sa.String(length=50), nullable=True),

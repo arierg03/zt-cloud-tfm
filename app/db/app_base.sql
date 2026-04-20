@@ -28,8 +28,6 @@ CREATE TABLE IF NOT EXISTS events (
   title varchar(255) NOT NULL,
   manual_description text,
   generated_description text,
-  source_url varchar(500),
-  source_name varchar(150),
   event_date timestamp,
   country varchar(100),
   language varchar(50),
