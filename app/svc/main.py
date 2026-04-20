@@ -14,8 +14,6 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://events_user:events_pass@d
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "86400"))
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() == "true"
 SVC_FORCE_REPROCESS = os.getenv("SVC_FORCE_REPROCESS", "false").lower() == "true"
-SVC_MAX_EVENTS_BATCH = int(os.getenv("SVC_MAX_EVENTS_BATCH", "0"))
-SVC_MAX_IMAGES_ANALYZED = int(os.getenv("SVC_MAX_IMAGES_ANALYZED", "6"))
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
 S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minioadmin")
@@ -53,7 +51,7 @@ def get_s3_client():
     )
 
 
-def fetch_events_to_process(conn, force_reprocess: bool, max_events_batch: int) -> list[dict]:
+def fetch_events_to_process(conn, force_reprocess: bool) -> list[dict]:
     query = """
         SELECT e.id, e.title, e.manual_description, e.event_date, e.country, e.language
         FROM events e
@@ -75,9 +73,6 @@ def fetch_events_to_process(conn, force_reprocess: bool, max_events_batch: int) 
         )
         """
     query += "\nORDER BY e.created_at ASC"
-    if max_events_batch > 0:
-        query += "\nLIMIT %s"
-        params.append(max_events_batch)
 
     with conn.cursor() as cur:
         cur.execute(query, params)
@@ -133,7 +128,7 @@ def fetch_s3_image_metadata(images: list[dict]) -> list[dict]:
     s3_client = get_s3_client()
     s3_metadata: list[dict] = []
 
-    for image in images[: max(1, SVC_MAX_IMAGES_ANALYZED)]:
+    for image in images:
         storage_path = image.get("storage_path")
         if not storage_path:
             continue
@@ -316,9 +311,8 @@ def finalize_batch_execution(
 
 def run_batch_once() -> None:
     logger.info(
-        "Batch run started | force_reprocess=%s max_events_batch=%s",
-        SVC_FORCE_REPROCESS,
-        SVC_MAX_EVENTS_BATCH if SVC_MAX_EVENTS_BATCH > 0 else "unlimited",
+        "Batch run started | force_reprocess=%s",
+        SVC_FORCE_REPROCESS
     )
     with psycopg.connect(DATABASE_URL) as conn:
         batch_id = create_batch_execution(conn)
@@ -330,8 +324,7 @@ def run_batch_once() -> None:
         try:
             events = fetch_events_to_process(
                 conn,
-                force_reprocess=SVC_FORCE_REPROCESS,
-                max_events_batch=SVC_MAX_EVENTS_BATCH,
+                force_reprocess=SVC_FORCE_REPROCESS
             )
             total_detected = len(events)
 
@@ -385,11 +378,10 @@ def run_batch_once() -> None:
 
 if __name__ == "__main__":
     logger.info(
-        "Service started | poll_seconds=%s run_once=%s force_reprocess=%s max_events_batch=%s db_host=%s",
+        "Service started | poll_seconds=%s run_once=%s force_reprocess=%s db_host=%s",
         POLL_SECONDS,
         RUN_ONCE,
         SVC_FORCE_REPROCESS,
-        SVC_MAX_EVENTS_BATCH if SVC_MAX_EVENTS_BATCH > 0 else "unlimited",
         DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else "n/a",
     )
     while True:
