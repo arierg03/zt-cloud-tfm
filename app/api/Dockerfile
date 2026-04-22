@@ -12,8 +12,14 @@ RUN addgroup --system app && adduser --system --ingroup app app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
-RUN chown -R app:app /app
+COPY --chown=app:app alembic ./alembic
+COPY --chown=app:app alembic.ini ./
+COPY --chown=app:app auth.py ./
+COPY --chown=app:app database.py ./
+COPY --chown=app:app main.py ./
+COPY --chown=app:app models.py ./
+COPY --chown=app:app schemas.py ./
+COPY --chown=app:app storage.py ./
 
 USER app
 
