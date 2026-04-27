@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tfm-app-config
+  namespace: tfm-app
+data:
+  POSTGRES_HOST: "tfm-app-rds.cvuc6mq8elwd.eu-south-2.rds.amazonaws.com"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "events"
+  S3_BUCKET: "events-images-296368270177-eu-south-2-an"
+  S3_REGION: "eu-south-2"
+  S3_USE_SSL: "true"
+  S3_ENDPOINT: ""
+  S3_PUBLIC_ENDPOINT: ""
+  S3_URL_TTL_SECONDS: "3600"
+  VITE_API_URL: "http://api:8000"

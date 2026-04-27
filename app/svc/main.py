@@ -14,9 +14,19 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://events_user:events_pass@d
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "86400"))
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() == "true"
 SVC_FORCE_REPROCESS = os.getenv("SVC_FORCE_REPROCESS", "false").lower() == "true"
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
-S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
-S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minioadmin")
+
+
+def _optional_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+S3_ENDPOINT = _optional_env("S3_ENDPOINT")
+S3_ACCESS_KEY = _optional_env("S3_ACCESS_KEY")
+S3_SECRET_KEY = _optional_env("S3_SECRET_KEY")
 S3_BUCKET = os.getenv("S3_BUCKET", "events-images")
 S3_REGION = os.getenv("S3_REGION", "eu-south-2")
 S3_USE_SSL = os.getenv("S3_USE_SSL", "false").lower() == "true"
@@ -40,15 +50,24 @@ def _is_path_style(endpoint: str) -> bool:
 
 @lru_cache(maxsize=1)
 def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=S3_ENDPOINT,
-        aws_access_key_id=S3_ACCESS_KEY,
-        aws_secret_access_key=S3_SECRET_KEY,
-        region_name=S3_REGION,
-        use_ssl=S3_USE_SSL,
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path" if _is_path_style(S3_ENDPOINT) else "virtual"}),
-    )
+    client_kwargs = {
+        "service_name": "s3",
+        "region_name": S3_REGION,
+        "use_ssl": S3_USE_SSL,
+        "config": Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path" if S3_ENDPOINT and _is_path_style(S3_ENDPOINT) else "virtual"},
+        ),
+    }
+
+    if S3_ENDPOINT:
+        client_kwargs["endpoint_url"] = S3_ENDPOINT
+
+    if S3_ACCESS_KEY and S3_SECRET_KEY:
+        client_kwargs["aws_access_key_id"] = S3_ACCESS_KEY
+        client_kwargs["aws_secret_access_key"] = S3_SECRET_KEY
+
+    return boto3.client(**client_kwargs)
 
 
 def fetch_events_to_process(conn, force_reprocess: bool) -> list[dict]:

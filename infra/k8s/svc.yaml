@@ -1,0 +1,84 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: svc
+  namespace: tfm-app
+spec:
+  schedule: "0 0 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: svc
+              image: 296368270177.dkr.ecr.eu-south-2.amazonaws.com/zt/svc:latest
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: tfm-app-secret
+                      key: DATABASE_URL_SVC
+                - name: POSTGRES_HOST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tfm-app-config
+                      key: POSTGRES_HOST
+                - name: POSTGRES_PORT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tfm-app-config
+                      key: POSTGRES_PORT
+                - name: POSTGRES_DB
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tfm-app-config
+                      key: POSTGRES_DB
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: tfm-app-secret
+                      key: POSTGRES_USER
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: tfm-app-secret
+                      key: POSTGRES_PASSWORD
+                - name: POLL_SECONDS
+                  value: "86400"
+                - name: RUN_ONCE
+                  value: "true"
+                - name: SVC_FORCE_REPROCESS
+                  value: "false"
+                - name: S3_BUCKET
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tfm-app-config
+                      key: S3_BUCKET
+                - name: S3_REGION
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tfm-app-config
+                      key: S3_REGION
+                - name: S3_ENDPOINT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tfm-app-config
+                      key: S3_ENDPOINT
+                - name: S3_USE_SSL
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tfm-app-config
+                      key: S3_USE_SSL
+                - name: S3_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: tfm-app-secret
+                      key: S3_ACCESS_KEY
+                - name: S3_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: tfm-app-secret
+                      key: S3_SECRET_KEY
+                - name: PYTHONUNBUFFERED
+                  value: "1"
