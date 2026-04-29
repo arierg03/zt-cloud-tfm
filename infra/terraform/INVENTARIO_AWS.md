@@ -113,6 +113,26 @@ eu-south-2
   - Todo el tráfico hacia 0.0.0.0/0
 - Observación: security group por defecto de la VPC. No se utiliza explícitamente para la aplicación.
 
+## ECR
+
+### Repositorio WEB
+- Nombre: zt/web
+- URI: 296368270177.dkr.ecr.eu-south-2.amazonaws.com/zt/web
+- Cifrado: AES256
+- Scan on push: false
+
+### Repositorio API
+- Nombre: zt/api
+- URI: 296368270177.dkr.ecr.eu-south-2.amazonaws.com/zt/api
+- Cifrado: AES256
+- Scan on push: false
+
+### Repositorio SVC
+- Nombre: zt/svc
+- URI: 296368270177.dkr.ecr.eu-south-2.amazonaws.com/zt/svc
+- Cifrado: AES256
+- Scan on push: false
+
 ## EKS
 - Cluster: tfm-app-eks
 - Node group: tfm-app-ng
@@ -127,8 +147,3 @@ eu-south-2
 
 ## S3
 - Bucket imágenes: events-images-296368270177-eu-south-2-an
-
-## ECR
-- Repositorio API: 296368270177.dkr.ecr.eu-south-2.amazonaws.com/zt/api
-- Repositorio WEB: 296368270177.dkr.ecr.eu-south-2.amazonaws.com/zt/web
-- Repositorio SVC: 296368270177.dkr.ecr.eu-south-2.amazonaws.com/zt/svc
