@@ -104,3 +104,57 @@ resource "aws_route_table_association" "private_2" {
   subnet_id      = aws_subnet.private_2.id
   route_table_id = aws_route_table.private_2.id
 }
+
+resource "aws_eip" "nat" {
+  count = var.create_nat ? 1 : 0
+
+  domain = "vpc"
+
+  tags = merge(local.common_tags, {
+    Name = "tfm-app-nat-eip"
+  })
+}
+
+resource "aws_nat_gateway" "main" {
+  count = var.create_nat ? 1 : 0
+
+  allocation_id = aws_eip.nat[0].id
+  subnet_id     = aws_subnet.public_1.id
+
+  tags = merge(local.common_tags, {
+    Name = "tfm-app-nat"
+  })
+
+  depends_on = [aws_internet_gateway.main]
+}
+
+resource "aws_route" "private_1_nat" {
+  count = var.create_nat ? 1 : 0
+
+  route_table_id         = aws_route_table.private_1.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main[0].id
+}
+
+resource "aws_route" "private_2_nat" {
+  count = var.create_nat ? 1 : 0
+
+  route_table_id         = aws_route_table.private_2.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main[0].id
+}
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${var.aws_region}.s3"
+  vpc_endpoint_type = "Gateway"
+
+  route_table_ids = [
+    aws_route_table.private_1.id,
+    aws_route_table.private_2.id
+  ]
+
+  tags = merge(local.common_tags, {
+    Name = "tfm-app-s3-vpce"
+  })
+}

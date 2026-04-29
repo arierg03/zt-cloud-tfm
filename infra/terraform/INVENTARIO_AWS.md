@@ -111,6 +111,32 @@ eu-south-2
   - Todo el tráfico hacia 0.0.0.0/0
 - Observación: security group por defecto de la VPC. No se utiliza explícitamente para la aplicación.
 
+## NAT Gateway
+
+### NAT Gateway para subredes privadas
+- Nombre: tfm-app-nat
+- Elastic IP: tfm-app-nat-eip
+- Subred pública asociada:
+  - subnet-0e9695e3939061ce1 (tfm-app-subnet-public1-eu-south-2a)
+- Uso:
+  - Permitir salida a Internet desde las subredes privadas cuando sea necesario.
+- Tablas de rutas privadas asociadas:
+  - rtb-027d0f5547df67cd5 (tfm-app-rtb-private1-eu-south-2a)
+  - rtb-0bbd08a1834142062 (tfm-app-rtb-private2-eu-south-2b)
+- Rutas activables:
+  - 0.0.0.0/0 -> NAT Gateway desde tabla privada 1
+  - 0.0.0.0/0 -> NAT Gateway desde tabla privada 2
+
+## VPC Endpoint
+
+### Endpoint privado para S3
+- ID: vpce-0751321a9d113c121
+- Tablas de rutas asociadas:
+  - rtb-027d0f5547df67cd5 (tfm-app-rtb-private1-eu-south-2a)
+  - rtb-0bbd08a1834142062 (tfm-app-rtb-private2-eu-south-2b)
+- Uso:
+  - Permitir acceso privado desde las subredes privadas a S3 sin requerir salida directa a Internet mediante NAT Gateway.
+
 ## ECR
 
 ### Repositorio WEB

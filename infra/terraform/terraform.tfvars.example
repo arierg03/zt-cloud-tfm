@@ -1,6 +1,7 @@
 aws_region   = "eu-south-2"
 project_name = "tfm-app"
 environment  = "base"
+create_nat   = false
 create_rds   = false
 db_name      = "events"
 db_username  = "events_user"

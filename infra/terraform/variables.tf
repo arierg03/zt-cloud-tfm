@@ -16,6 +16,12 @@ variable "environment" {
   default     = "base"
 }
 
+variable "create_nat" {
+  description = "Indica si se debe crear una NAT Gateway para dar salida a Internet a las subredes privadas"
+  type        = bool
+  default     = false
+}
+
 variable "create_rds" {
   description = "Indica si se debe crear la instancia RDS PostgreSQL"
   type        = bool
