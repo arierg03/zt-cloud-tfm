@@ -72,11 +72,6 @@ resource "aws_route_table" "public" {
 resource "aws_route_table" "private_1" {
   vpc_id = aws_vpc.main.id
 
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = "nat-0f05d474d04b2e2f8"
-  }
-
   tags = merge(local.common_tags, {
     Name = "tfm-app-rtb-private1-eu-south-2a"
   })
@@ -84,11 +79,6 @@ resource "aws_route_table" "private_1" {
 
 resource "aws_route_table" "private_2" {
   vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = "nat-0f05d474d04b2e2f8"
-  }
 
   tags = merge(local.common_tags, {
     Name = "tfm-app-rtb-private2-eu-south-2b"
