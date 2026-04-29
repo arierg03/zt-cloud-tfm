@@ -40,7 +40,6 @@ eu-south-2
   - subnet-0bf6264b0a0ff6873 (tfm-app-subnet-private1-eu-south-2a)
 - Rutas:
   - 10.0.0.0/16 -> local
-  - 0.0.0.0/0 -> nat-0f05d474d04b2e2f8
   - ruta hacia VPC Endpoint -> vpce-0751321a9d113c121
 
 ### Tabla de rutas privada 2
@@ -50,7 +49,6 @@ eu-south-2
   - subnet-0b2a59812663e59d2 (tfm-app-subnet-private2-eu-south-2b)
 - Rutas:
   - 10.0.0.0/16 -> local
-  - 0.0.0.0/0 -> nat-0f05d474d04b2e2f8
   - ruta hacia VPC Endpoint -> vpce-0751321a9d113c121
 
 ### Tabla de rutas principal sin uso explícito
@@ -151,15 +149,35 @@ eu-south-2
 - Observación:
   - El bucket no es público. El acceso debe realizarse desde la aplicación mediante credenciales/políticas IAM.
 
+## RDS
+
+### Instancia PostgreSQL
+- Identificador: tfm-app-rds
+- Engine: PostgreSQL
+- Versión: 16
+- Clase de instancia: db.t4g.micro
+- Almacenamiento asignado: 20 GB
+- Tipo de almacenamiento: gp3
+- Cifrado en reposo: true
+- Nombre de base de datos: events
+- Usuario administrador: events_user
+- Puerto: 5432
+- Acceso público: false
+- Multi-AZ: false
+- Backups automáticos: desactivados
+- Protección frente a borrado: desactivada
+- Subnet group: tfm-app-rds-subnet-group
+- Subredes del subnet group:
+  - subnet-0bf6264b0a0ff6873 (tfm-app-subnet-private1-eu-south-2a)
+  - subnet-0b2a59812663e59d2 (tfm-app-subnet-private2-eu-south-2b)
+- Security group:
+  - sg-071fa586d4a011325 (tfm-app-rds-sg)
+- Regla de acceso prevista:
+  - Entrada TCP 5432 únicamente desde sg-04dd3b5cd364fa434 (eks-cluster-sg-tfm-app-eks-20428623)
+
 ## EKS
 - Cluster: tfm-app-eks
 - Node group: tfm-app-ng
 - Versión Kubernetes: 1.35
 
-## RDS
-- Identificador: tfm-app-rds
-- Engine: PostgreSQL
-- Versión: 16
-- Subnet group: tfm-app-rds-subnet-group (2 privadas)
-- Security group: sg-071fa586d4a011325 (tfm-app-rds-sg)
 

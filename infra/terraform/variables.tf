@@ -15,3 +15,28 @@ variable "environment" {
   type        = string
   default     = "base"
 }
+
+variable "create_rds" {
+  description = "Indica si se debe crear la instancia RDS PostgreSQL"
+  type        = bool
+  default     = false
+}
+
+variable "db_name" {
+  description = "Nombre de la base de datos"
+  type        = string
+  default     = "events"
+}
+
+variable "db_username" {
+  description = "Usuario administrador de la base de datos"
+  type        = string
+  default     = "events_user"
+}
+
+variable "db_password" {
+  description = "Password administrador de la base de datos"
+  type        = string
+  sensitive   = true
+  default     = null
+}
