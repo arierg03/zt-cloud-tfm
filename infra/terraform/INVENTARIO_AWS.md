@@ -133,6 +133,24 @@ eu-south-2
 - Cifrado: AES256
 - Scan on push: false
 
+## S3
+
+### Bucket de imágenes
+- Nombre: events-images-296368270177-eu-south-2-an
+- Región: eu-south-2
+- Uso: almacenamiento de imágenes asociadas a eventos.
+- Bloqueo de acceso público:
+  - BlockPublicAcls: true
+  - IgnorePublicAcls: true
+  - BlockPublicPolicy: true
+  - RestrictPublicBuckets: true
+- Cifrado:
+  - SSE-S3 / AES256
+- Versionado:
+  - No configurado
+- Observación:
+  - El bucket no es público. El acceso debe realizarse desde la aplicación mediante credenciales/políticas IAM.
+
 ## EKS
 - Cluster: tfm-app-eks
 - Node group: tfm-app-ng
@@ -145,5 +163,3 @@ eu-south-2
 - Subnet group: tfm-app-rds-subnet-group (2 privadas)
 - Security group: sg-071fa586d4a011325 (tfm-app-rds-sg)
 
-## S3
-- Bucket imágenes: events-images-296368270177-eu-south-2-an
