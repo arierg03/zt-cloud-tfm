@@ -131,6 +131,8 @@ eu-south-2
 
 ### Endpoint privado para S3
 - ID: vpce-0751321a9d113c121
+- Tipo: Gateway Endpoint
+- Servicio: com.amazonaws.eu-south-2.s3
 - Tablas de rutas asociadas:
   - rtb-027d0f5547df67cd5 (tfm-app-rtb-private1-eu-south-2a)
   - rtb-0bbd08a1834142062 (tfm-app-rtb-private2-eu-south-2b)
@@ -198,7 +200,7 @@ eu-south-2
   - subnet-0b2a59812663e59d2 (tfm-app-subnet-private2-eu-south-2b)
 - Security group:
   - sg-071fa586d4a011325 (tfm-app-rds-sg)
-- Regla de acceso prevista:
+- Regla de acceso:
   - Entrada TCP 5432 únicamente desde sg-04dd3b5cd364fa434 (eks-cluster-sg-tfm-app-eks-20428623)
 
 ## EKS
@@ -269,4 +271,55 @@ eu-south-2
   - s3:GetObject, s3:PutObject, s3:DeleteObject sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an/*
 - Uso:
   - Ejecución de los pods de la aplicación.
+
+## IAM
+
+### Usuario IAM para acceso a S3 desde la aplicación
+- Nombre: tfm-app-s3-user
+- ARN: arn:aws:iam::296368270177:user/tfm-app-s3-user
+- Acceso a consola: desactivado
+- Uso:
+  - Generación de access keys utilizadas por la aplicación para acceder al bucket de imágenes.
+  - Las credenciales se almacenan como Secret de Kubernetes en `infra/k8s/secrets.yaml`.
+- Política asociada:
+  - tfm-app-s3-user-policy
+- Permisos de la política:
+  - s3:ListBucket sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an
+  - s3:GetObject, s3:PutObject, s3:DeleteObject sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an/*
+- Observación:
+  - Las access keys no se gestionan con Terraform para evitar almacenar secretos en el estado.
+
+### OIDC Provider de EKS
+- ARN: arn:aws:iam::296368270177:oidc-provider/oidc.eks.eu-south-2.amazonaws.com/id/AEEB296AFF3D3A228A7647FC3C1E89A1
+- URL: https://oidc.eks.eu-south-2.amazonaws.com/id/AEEB296AFF3D3A228A7647FC3C1E89A1
+- Client ID:
+  - sts.amazonaws.com
+- Tags de origen:
+  - alpha.eksctl.io/cluster-name: tfm-app-eks
+  - alpha.eksctl.io/eksctl-version: 0.225.0
+- Uso:
+  - Habilitar federación OIDC entre EKS e IAM.
+  - Permitir el uso de IRSA para asociar permisos IAM a service accounts de Kubernetes.
+  - Dar soporte al rol `AmazonEKSLoadBalancerControllerRole`, usado por el service account `kube-system/aws-load-balancer-controller`.
+
+### Rol IAM para AWS Load Balancer Controller
+- Nombre: AmazonEKSLoadBalancerControllerRole
+- ARN: arn:aws:iam::296368270177:role/AmazonEKSLoadBalancerControllerRole
+- Uso:
+  - Permitir que el AWS Load Balancer Controller gestione recursos de balanceo de carga en AWS desde Kubernetes.
+  - Creación y gestión de Application Load Balancers, listeners, target groups y reglas asociadas al Ingress de Kubernetes.
+- Mecanismo de confianza:
+  - IRSA mediante OIDC provider de EKS.
+- OIDC provider:
+  - arn:aws:iam::296368270177:oidc-provider/oidc.eks.eu-south-2.amazonaws.com/id/AEEB296AFF3D3A228A7647FC3C1E89A1
+- ServiceAccount autorizado:
+  - kube-system/aws-load-balancer-controller
+- Política asociada:
+  - AWSLoadBalancerControllerIAMPolicy
+- ARN de la política:
+  - arn:aws:iam::296368270177:policy/AWSLoadBalancerControllerIAMPolicy
+- Descripción de la política:
+  - Policy descargada de raw.githubusercontent.com aws-load-balancer-controller.
+- Observación:
+  - Este rol permite que el controlador desplegado en Kubernetes interactúe con servicios de AWS mediante federación OIDC, evitando el uso de credenciales estáticas dentro del cluster.
 
