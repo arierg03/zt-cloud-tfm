@@ -202,8 +202,71 @@ eu-south-2
   - Entrada TCP 5432 únicamente desde sg-04dd3b5cd364fa434 (eks-cluster-sg-tfm-app-eks-20428623)
 
 ## EKS
-- Cluster: tfm-app-eks
-- Node group: tfm-app-ng
-- Versión Kubernetes: 1.35
 
+### Cluster Kubernetes
+- Nombre del cluster: tfm-app-eks
+- Versión Kubernetes: 1.35
+- Modo automático de EKS: desactivado
+- Política de actualización: soporte estándar
+- Rol IAM del cluster: arn:aws:iam::296368270177:role/tfm-app-eks-cluster-role
+- Política asociada al rol del cluster:
+  - AmazonEKSClusterPolicy
+- Modo de autenticación: API de EKS y ConfigMap
+- Acceso de administrador del cluster de Kubernetes: habilitado
+- Nivel de escalado del plano de control: estándar
+- Protección contra eliminaciones: desactivada
+- VPC:
+  - vpc-036af3ec3778f5b1c (tfm-app-vpc)
+- Familia de direcciones IP del cluster: IPv4
+- Subredes asociadas:
+  - subnet-0bf6264b0a0ff6873 (tfm-app-subnet-private1-eu-south-2a)
+  - subnet-0b2a59812663e59d2 (tfm-app-subnet-private2-eu-south-2b)
+- Acceso al endpoint del cluster:
+  - Público: habilitado
+  - Privado: habilitado
+- Métricas:
+  - Desactivadas
+- Registros del plano de control:
+  - API server
+  - Audit
+  - Authenticator
+- Complementos:
+  - kube-proxy: v1.35.3-eksbuild.2
+  - CoreDNS: v1.13.2-eksbuild.4
+  - Amazon VPC CNI: v1.21.1-eksbuild.1
+- Uso:
+  - Orquestación de los contenedores de la aplicación base.
+
+### Node group
+- Nombre: tfm-app-ng
+- Tipo: Managed Node Group
+- Versión Kubernetes: 1.35
+- Tipo de capacidad: On-Demand
+- Tipo de AMI: Amazon Linux 2023 (x86_64) estándar
+- AMI type: AL2023_x86_64_STANDARD
+- Tipo de instancia: t3.medium
+- Tamaño de disco: 20 GiB
+- Tamaño deseado: 1 nodo
+- Tamaño mínimo: 1 nodo
+- Tamaño máximo: 1 nodo
+- Grupo en caliente del ASG: desactivado
+- Máximo no disponible durante actualización: 1 nodo
+- Reparación automática de nodos: desactivada
+- Acceso remoto a los nodos: desactivado
+- Subredes asociadas:
+  - subnet-0bf6264b0a0ff6873 (tfm-app-subnet-private1-eu-south-2a)
+  - subnet-0b2a59812663e59d2 (tfm-app-subnet-private2-eu-south-2b)
+- Rol IAM de los nodos:
+  - arn:aws:iam::296368270177:role/tfm-app-eks-node-role
+- Políticas administradas asociadas al rol de nodos:
+  - AmazonEC2ContainerRegistryReadOnly
+  - AmazonEKS_CNI_Policy
+  - AmazonEKSWorkerNodePolicy
+- Política inline asociada al rol de nodos:
+  - tfm-app-node-s3-policy
+- Permisos S3 de la política inline:
+  - s3:ListBucket sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an
+  - s3:GetObject, s3:PutObject, s3:DeleteObject sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an/*
+- Uso:
+  - Ejecución de los pods de la aplicación.
 

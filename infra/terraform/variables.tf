@@ -16,18 +16,6 @@ variable "environment" {
   default     = "base"
 }
 
-variable "create_nat" {
-  description = "Indica si se debe crear una NAT Gateway para dar salida a Internet a las subredes privadas"
-  type        = bool
-  default     = false
-}
-
-variable "create_rds" {
-  description = "Indica si se debe crear la instancia RDS PostgreSQL"
-  type        = bool
-  default     = false
-}
-
 variable "db_name" {
   description = "Nombre de la base de datos"
   type        = string
@@ -45,4 +33,22 @@ variable "db_password" {
   type        = string
   sensitive   = true
   default     = null
+}
+
+variable "create_nat" {
+  description = "Indica si se debe crear una NAT Gateway para dar salida a Internet a las subredes privadas"
+  type        = bool
+  default     = false
+}
+
+variable "create_rds" {
+  description = "Indica si se debe crear la instancia RDS PostgreSQL"
+  type        = bool
+  default     = false
+}
+
+variable "create_eks" {
+  description = "Indica si se debe crear el cluster EKS y su node group"
+  type        = bool
+  default     = false
 }
