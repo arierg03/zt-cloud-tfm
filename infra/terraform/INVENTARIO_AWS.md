@@ -61,6 +61,58 @@ eu-south-2
   - 10.0.0.0/16 -> local
 - Observación: tabla de rutas principal/default de la VPC, sin asociaciones explícitas.
 
+## Security Groups
+
+### RDS Security Group
+- ID: sg-071fa586d4a011325
+- Nombre: tfm-app-rds-sg
+- Descripción: Created by RDS management console
+- Uso: controla el acceso a la base de datos PostgreSQL en RDS.
+- Reglas de entrada:
+  - TCP 5432 desde sg-04dd3b5cd364fa434 (eks-cluster-sg-tfm-app-eks-20428623)
+- Reglas de salida:
+  - Todo el tráfico hacia 0.0.0.0/0
+
+### EKS Cluster Security Group
+- ID: sg-04dd3b5cd364fa434
+- Nombre: eks-cluster-sg-tfm-app-eks-20428623
+- Descripción: creado automáticamente por EKS para el plano de control y workloads gestionados.
+- Reglas de entrada:
+  - TCP 8000-8080 desde sg-087a5a2460bd28898
+- Reglas de salida:
+  - Todo el tráfico hacia 0.0.0.0/0
+- Observación: recurso gestionado por EKS. No se modifica manualmente por ahora.
+
+### Load Balancer Managed Security Group
+- ID: sg-05f5e2720548ca488
+- Nombre: k8s-tfmapp-tfmappin-635e7e9814
+- Descripción: [k8s] Managed SecurityGroup for LoadBalancer
+- Reglas de entrada:
+  - TCP 80 desde 0.0.0.0/0
+- Reglas de salida:
+  - Todo el tráfico hacia 0.0.0.0/0
+- Observación: creado por AWS Load Balancer Controller a partir del Ingress de Kubernetes.
+
+### Load Balancer Backend Security Group
+- ID: sg-087a5a2460bd28898
+- Nombre: k8s-traffic-tfmappeks-7dd757b3ae
+- Descripción: [k8s] Shared Backend SecurityGroup for LoadBalancer
+- Reglas de entrada:
+  - Ninguna regla explícita de entrada.
+- Reglas de salida:
+  - Todo el tráfico hacia 0.0.0.0/0
+- Observación: creado por AWS Load Balancer Controller para tráfico hacia backends de Kubernetes.
+
+### Default Security Group
+- ID: sg-035050643441a5609
+- Nombre: default
+- Descripción: default VPC security group
+- Reglas de entrada:
+  - Todo el tráfico desde el propio default security group.
+- Reglas de salida:
+  - Todo el tráfico hacia 0.0.0.0/0
+- Observación: security group por defecto de la VPC. No se utiliza explícitamente para la aplicación.
+
 ## EKS
 - Cluster: tfm-app-eks
 - Node group: tfm-app-ng
