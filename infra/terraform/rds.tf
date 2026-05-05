@@ -2,7 +2,7 @@ resource "aws_db_subnet_group" "rds" {
   count = var.create_rds ? 1 : 0
 
   name        = "tfm-app-rds-subnet-group"
-  description = "Subnet group for TFM app RDS"
+  description = "Subred para RDS con redes privadas unicamente"
 
   subnet_ids = [
     aws_subnet.private_1.id,

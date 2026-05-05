@@ -44,7 +44,7 @@ resource "aws_iam_user_policy_attachment" "s3_user" {
 }
 
 resource "aws_iam_openid_connect_provider" "eks" {
-  url = "https://oidc.eks.eu-south-2.amazonaws.com/id/AEEB296AFF3D3A228A7647FC3C1E89A1"
+  url = var.eks_oidc_issuer_url
 
   client_id_list = [
     "sts.amazonaws.com"
@@ -72,8 +72,8 @@ resource "aws_iam_role" "load_balancer_controller" {
         Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
           StringEquals = {
-            "oidc.eks.eu-south-2.amazonaws.com/id/AEEB296AFF3D3A228A7647FC3C1E89A1:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
-            "oidc.eks.eu-south-2.amazonaws.com/id/AEEB296AFF3D3A228A7647FC3C1E89A1:aud" = "sts.amazonaws.com"
+            "${local.eks_oidc_provider_hostpath}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
+            "${local.eks_oidc_provider_hostpath}:aud" = "sts.amazonaws.com"
           }
         }
       }

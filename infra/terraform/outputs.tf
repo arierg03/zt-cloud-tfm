@@ -41,3 +41,47 @@ output "s3_vpc_endpoint_id" {
   description = "ID del VPC Endpoint Gateway para S3"
   value       = aws_vpc_endpoint.s3.id
 }
+
+output "s3_bucket_name" {
+  description = "Nombre del bucket S3 de imágenes"
+  value       = aws_s3_bucket.images.bucket
+}
+
+output "ecr_repository_urls" {
+  description = "URLs de los repositorios ECR"
+  value = {
+    api = aws_ecr_repository.api.repository_url
+    web = aws_ecr_repository.web.repository_url
+    svc = aws_ecr_repository.svc.repository_url
+  }
+}
+
+output "rds_endpoint" {
+  description = "Endpoint de la instancia RDS, si está creada"
+  value       = var.create_rds ? aws_db_instance.rds[0].endpoint : null
+}
+
+output "rds_address" {
+  description = "Dirección DNS de la instancia RDS, si está creada"
+  value       = var.create_rds ? aws_db_instance.rds[0].address : null
+}
+
+output "eks_cluster_name" {
+  description = "Nombre del cluster EKS, si está creado"
+  value       = var.create_eks ? aws_eks_cluster.main[0].name : null
+}
+
+output "eks_cluster_endpoint" {
+  description = "Endpoint del cluster EKS, si está creado"
+  value       = var.create_eks ? aws_eks_cluster.main[0].endpoint : null
+}
+
+output "eks_oidc_issuer_url" {
+  description = "Issuer OIDC del cluster EKS configurado para Terraform"
+  value       = var.eks_oidc_issuer_url
+}
+
+output "nat_gateway_id" {
+  description = "ID de la NAT Gateway, si está creada"
+  value       = var.create_nat ? aws_nat_gateway.main[0].id : null
+}

@@ -52,3 +52,9 @@ variable "create_eks" {
   type        = bool
   default     = false
 }
+
+variable "eks_oidc_issuer_url" {
+  description = "URL del issuer OIDC del cluster EKS"
+  type        = string
+  default     = "https://oidc.eks.eu-south-2.amazonaws.com/id/AEEB296AFF3D3A228A7647FC3C1E89A1"
+}

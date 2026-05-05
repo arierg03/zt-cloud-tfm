@@ -45,20 +45,51 @@ function Write-RuntimeTfvars {
     param(
         [bool]$CreateEks,
         [bool]$CreateRds,
-        [bool]$CreateNat
+        [bool]$CreateNat,
+        [string]$EksOidcIssuerUrl = ""
     )
 
     $repoRoot = Get-RepoRoot
     $tfvarsPath = Join-Path $repoRoot "infra\terraform\runtime.auto.tfvars"
 
-    $content = @"
-create_eks = $($CreateEks.ToString().ToLower())
-create_rds = $($CreateRds.ToString().ToLower())
-create_nat = $($CreateNat.ToString().ToLower())
-"@
+    $lines = @(
+        "create_eks = $($CreateEks.ToString().ToLower())",
+        "create_rds = $($CreateRds.ToString().ToLower())",
+        "create_nat = $($CreateNat.ToString().ToLower())"
+    )
 
-    Set-Content -Path $tfvarsPath -Value $content -Encoding UTF8
+    if ($EksOidcIssuerUrl -eq "" -and (Test-Path $tfvarsPath)) {
+        $existing = Get-Content $tfvarsPath | Where-Object { $_ -match '^eks_oidc_issuer_url\s*=' } | Select-Object -First 1
+        if ($existing) {
+            $EksOidcIssuerUrl = ($existing -replace 'eks_oidc_issuer_url\s*=\s*"', '') -replace '"', ''
+        }
+    }
+
+    if ($EksOidcIssuerUrl -ne "") {
+        $lines += "eks_oidc_issuer_url = `"$EksOidcIssuerUrl`""
+    }
+
+    Set-Content -Path $tfvarsPath -Value ($lines -join "`n") -Encoding UTF8
     Write-Host "Escrito $tfvarsPath"
+}
+
+function Get-EksOidcIssuerUrl {
+    param(
+        [string]$Region,
+        [string]$ClusterName
+    )
+
+    $issuer = aws eks describe-cluster `
+        --region $Region `
+        --name $ClusterName `
+        --query "cluster.identity.oidc.issuer" `
+        --output text
+
+    if (-not $issuer -or $issuer -eq "None") {
+        throw "No se pudo obtener el issuer OIDC del cluster $ClusterName"
+    }
+
+    return $issuer.Trim()
 }
 
 function Invoke-Terraform {
@@ -71,7 +102,11 @@ function Invoke-Terraform {
 
     Push-Location $tfDir
     try {
-        terraform @Arguments
+        & terraform @Arguments
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Terraform fallo con codigo de salida $LASTEXITCODE"
+        }
     }
     finally {
         Pop-Location
@@ -86,7 +121,6 @@ function Invoke-KubectlApply {
         "namespace.yaml",
         "secret.local.yaml",
         "configmap.yaml",
-        "aws-lbc-sa.yaml",
         "api.yaml",
         "svc.yaml",
         "web.yaml",
@@ -97,6 +131,10 @@ function Invoke-KubectlApply {
         $path = Join-Path $k8sDir $file
         if (Test-Path $path) {
             kubectl apply -f $path
+
+            if ($LASTEXITCODE -ne 0) {
+                throw "kubectl apply fallo para $path"
+            }
         }
         else {
             Write-Warning "No existe $path. Se omite."
@@ -136,6 +174,10 @@ function Update-Kubeconfig {
     )
 
     aws eks update-kubeconfig --region $Region --name $ClusterName
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "No se pudo actualizar kubeconfig para el cluster $ClusterName"
+    }
 }
 
 function Test-EksClusterExists {
@@ -190,9 +232,127 @@ function Show-NatStatus {
     $natGateways | Format-Table -AutoSize
 }
 
+function Repair-PrivateNatRoutes {
+    param(
+        [string]$Region
+    )
+
+    $routeTables = @(
+        "rtb-027d0f5547df67cd5",
+        "rtb-0bbd08a1834142062"
+    )
+
+    foreach ($rtb in $routeTables) {
+        $route = aws ec2 describe-route-tables `
+            --region $Region `
+            --route-table-ids $rtb `
+            --query "RouteTables[0].Routes[?DestinationCidrBlock=='0.0.0.0/0'] | [0]" `
+            --output json | ConvertFrom-Json
+
+        if ($route -and $route.State -eq "blackhole") {
+            Write-Warning "Eliminando ruta blackhole 0.0.0.0/0 en $rtb"
+            aws ec2 delete-route `
+                --region $Region `
+                --route-table-id $rtb `
+                --destination-cidr-block 0.0.0.0/0
+        }
+    }
+}
+
+function Install-LoadBalancerController {
+    param(
+        [string]$Region,
+        [string]$ClusterName
+    )
+
+    Require-Command -Name "helm"
+
+    helm repo add eks https://aws.github.io/eks-charts | Out-Host
+    helm repo update | Out-Host
+
+    helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller `
+        -n kube-system `
+        --set clusterName=$ClusterName `
+        --set serviceAccount.create=false `
+        --set serviceAccount.name=aws-load-balancer-controller `
+        --set region=$Region `
+        --set vpcId=vpc-036af3ec3778f5b1c
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Fallo instalando AWS Load Balancer Controller"
+    }
+}
+
+function Wait-ForIngressAddress {
+    param(
+        [string]$Namespace = "tfm-app",
+        [string]$IngressName = "tfm-app-ingress",
+        [int]$TimeoutSeconds = 600
+    )
+
+    $elapsed = 0
+
+    while ($elapsed -lt $TimeoutSeconds) {
+        $address = ""
+        try {
+            $address = kubectl -n $Namespace get ingress $IngressName -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" 2>$null
+        }
+        catch {
+            $address = ""
+        }
+
+        if ($address) {
+            Write-Host "Ingress disponible: http://$address"
+            return
+        }
+
+        Write-Host "Esperando ADDRESS del Ingress... ${elapsed}s/${TimeoutSeconds}s"
+        Start-Sleep -Seconds 15
+        $elapsed += 15
+    }
+
+    throw "Timeout esperando ADDRESS del Ingress $IngressName"
+}
+
+function Invoke-KubectlApplyFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName
+    )
+
+    $repoRoot = Get-RepoRoot
+    $k8sDir = Join-Path $repoRoot "infra\k8s"
+    $path = Join-Path $k8sDir $FileName
+
+    if (-not (Test-Path $path)) {
+        throw "No existe $path"
+    }
+
+    kubectl apply -f $path
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "kubectl apply fallo para $path"
+    }
+}
+
+function Wait-ForLoadBalancerController {
+    param(
+        [int]$TimeoutSeconds = 300
+    )
+
+    Write-Host "Esperando a que AWS Load Balancer Controller este listo..."
+
+    kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout="${TimeoutSeconds}s"
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "AWS Load Balancer Controller no quedo listo dentro del timeout"
+    }
+}
+
 function Run-Deploy {
     Write-Section "Deploy cloud"
 
+    Write-Section "Activar infraestructura base con coste"
     Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true
 
     Write-Section "Terraform init"
@@ -201,7 +361,10 @@ function Run-Deploy {
     Write-Section "Terraform validate"
     Invoke-Terraform @("validate")
 
-    Write-Section "Terraform apply"
+    Write-Section "Reparar rutas NAT blackhole previas"
+    Repair-PrivateNatRoutes -Region $Region
+
+    Write-Section "Terraform apply infraestructura"
     if ($AutoApprove) {
         Invoke-Terraform @("apply", "-auto-approve")
     }
@@ -209,11 +372,38 @@ function Run-Deploy {
         Invoke-Terraform @("apply")
     }
 
-    Write-Section "Update kubeconfig"
+    Write-Section "Actualizar kubeconfig"
     Update-Kubeconfig -Region $Region -ClusterName $ClusterName
 
-    Write-Section "Apply Kubernetes manifests"
+    Write-Section "Detectar OIDC issuer del cluster"
+    $oidcIssuer = Get-EksOidcIssuerUrl -Region $Region -ClusterName $ClusterName
+    Write-Host "OIDC issuer: $oidcIssuer"
+
+    Write-Section "Actualizar runtime.auto.tfvars con OIDC"
+    Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true -EksOidcIssuerUrl $oidcIssuer
+
+    Write-Section "Terraform apply IAM/OIDC"
+    if ($AutoApprove) {
+        Invoke-Terraform @("apply", "-auto-approve")
+    }
+    else {
+        Invoke-Terraform @("apply")
+    }
+
+    Write-Section "Aplicar ServiceAccount del Load Balancer Controller"
+    Invoke-KubectlApplyFile -FileName "aws-lbc-sa.yaml"
+
+    Write-Section "Instalar AWS Load Balancer Controller"
+    Install-LoadBalancerController -Region $Region -ClusterName $ClusterName
+
+    Write-Section "Esperar AWS Load Balancer Controller"
+    Wait-ForLoadBalancerController
+
+    Write-Section "Aplicar manifiestos Kubernetes"
     Invoke-KubectlApply
+
+    Write-Section "Esperar Ingress ALB"
+    Wait-ForIngressAddress
 
     Write-Section "Kubernetes status"
     kubectl -n tfm-app get pods,svc,ingress
@@ -222,9 +412,15 @@ function Run-Deploy {
 function Run-Stop {
     Write-Section "Stop cloud"
 
+    $oidcIssuer = ""
+
     if (Test-EksClusterExists -Region $Region -ClusterName $ClusterName) {
         Write-Section "Update kubeconfig"
         Update-Kubeconfig -Region $Region -ClusterName $ClusterName
+
+        Write-Section "Detectar OIDC issuer actual"
+        $oidcIssuer = Get-EksOidcIssuerUrl -Region $Region -ClusterName $ClusterName
+        Write-Host "OIDC issuer: $oidcIssuer"
 
         Write-Section "Delete Kubernetes resources"
         Invoke-KubectlDeleteForStop
@@ -237,7 +433,7 @@ function Run-Stop {
         Write-Warning "El cluster EKS $ClusterName no existe. Se omite borrado de manifiestos Kubernetes."
     }
 
-    Write-RuntimeTfvars -CreateEks $false -CreateRds $false -CreateNat $false
+    Write-RuntimeTfvars -CreateEks $false -CreateRds $false -CreateNat $false -EksOidcIssuerUrl $oidcIssuer
 
     Write-Section "Terraform apply"
     if ($AutoApprove) {
@@ -284,6 +480,7 @@ Require-Command -Name "terraform"
 switch ($Action) {
     "deploy" {
         Require-Command -Name "kubectl"
+        Require-Command -Name "helm"
         Run-Deploy
     }
     "stop" {
