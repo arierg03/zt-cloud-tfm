@@ -135,3 +135,8 @@ cache/
 # Kubernetes local data
 # ------------------------------
 */k8s/*.local.yaml
+
+# ------------------------------
+# Evaluation results local data
+# ------------------------------
+evaluation/results
