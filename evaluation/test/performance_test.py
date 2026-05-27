@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import requests
 
 
@@ -155,6 +156,59 @@ def run_performance_test(test_id, name, iterations, request_func):
     }
 
 
+def safe_name(text):
+    normalized = (
+        text.lower()
+        .replace(" ", "_")
+        .replace("á", "a")
+        .replace("é", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ú", "u")
+    )
+    return "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in normalized)
+
+
+def generate_plots(tests, environment, output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    labels = []
+    series = []
+    for test in tests:
+        successful_times = [m["elapsed_ms"] for m in test["measurements"] if m["success"]]
+        if successful_times:
+            labels.append(test["id"])
+            series.append(successful_times)
+
+    if series:
+        plt.figure(figsize=(10, 6))
+        plt.boxplot(series, tick_labels=labels, showfliers=True)
+        plt.title(f"Distribucion de tiempos por prueba ({environment})")
+        plt.xlabel("Prueba")
+        plt.ylabel("Tiempo (ms)")
+        plt.grid(axis="y", linestyle="--", alpha=0.4)
+        plt.tight_layout()
+        plt.savefig(output_dir / f"performance_boxplot_{environment}.png", dpi=150)
+        plt.close()
+
+    for test in tests:
+        x_values = list(range(1, len(test["measurements"]) + 1))
+        y_values = [m["elapsed_ms"] for m in test["measurements"]]
+        colors = ["#2ca02c" if m["success"] else "#d62728" for m in test["measurements"]]
+
+        plt.figure(figsize=(10, 4))
+        plt.scatter(x_values, y_values, c=colors, s=20)
+        plt.plot(x_values, y_values, linewidth=1.0, alpha=0.6)
+        plt.title(f"{test['id']} - {test['name']} ({environment})")
+        plt.xlabel("Iteracion")
+        plt.ylabel("Tiempo (ms)")
+        plt.grid(linestyle="--", alpha=0.4)
+        plt.tight_layout()
+        file_name = f"{safe_name(test['id'] + '_' + test['name'])}_{environment}.png"
+        plt.savefig(output_dir / file_name, dpi=150)
+        plt.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", required=True, choices=["base", "zt"])
@@ -164,6 +218,7 @@ def main():
     parser.add_argument("--image-path", required=True)
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--output-dir", default="evaluation/results")
+    parser.add_argument("--skip-plots", action="store_true")
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
@@ -272,6 +327,9 @@ def main():
         json.dumps(result, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+
+    if not args.skip_plots:
+        generate_plots(tests, args.env, output_dir)
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
 

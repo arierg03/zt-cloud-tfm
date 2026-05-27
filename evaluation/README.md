@@ -241,6 +241,7 @@ Parámetros del script:
 - `--image-path`
 - `--iterations` (por defecto `20`)
 - `--output-dir` (por defecto `evaluation/results`)
+- `--skip-plots` (opcional, omite la generación de gráficas PNG)
 
 Ejemplo de ejecución (base):
 
@@ -263,6 +264,14 @@ Evidencias generadas:
 ```text
 evaluation/results/base/performance_base.json
 evaluation/results/zt/performance_zt.json
+evaluation/results/base/performance_boxplot_base.png
+evaluation/results/base/r1_..._base.png
+evaluation/results/base/r2_..._base.png
+evaluation/results/base/r3_..._base.png
+evaluation/results/zt/performance_boxplot_zt.png
+evaluation/results/zt/r1_..._zt.png
+evaluation/results/zt/r2_..._zt.png
+evaluation/results/zt/r3_..._zt.png
 ```
 
 ## 4. Complejidad, despliegue y coste
@@ -344,7 +353,7 @@ evaluation/results/zt/complexity_zt.json
 Para ejecutar los scripts Python:
 
 ```powershell
-pip install requests
+pip install requests matplotlib
 ```
 
 Para los scripts PowerShell se requiere:
