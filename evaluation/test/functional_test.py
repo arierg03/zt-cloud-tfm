@@ -269,11 +269,11 @@ def main():
         }
 
     tests = [
-        run_step("PF-01", "Comprobación de disponibilidad", pf01_availability),
-        run_step("PF-02", "Autenticación de usuario", pf02_login),
-        run_step("PF-03", "Creación de evento", pf03_create_event),
-        run_step("PF-04", "Subida de imagen", pf04_upload_image),
-        run_step("PF-05", "Consulta de evento y resultado batch", pf05_query_event_and_batch),
+        run_step("F1", "Comprobación de disponibilidad", pf01_availability),
+        run_step("F2", "Autenticación de usuario", pf02_login),
+        run_step("F3", "Creación de evento", pf03_create_event),
+        run_step("F4", "Subida de imagen", pf04_upload_image),
+        run_step("F5", "Consulta de evento y resultado batch", pf05_query_event_and_batch),
     ]
 
     result = {
