@@ -5,6 +5,9 @@ param(
 
     [string]$Region = "eu-south-2",
     [string]$ClusterName = "tfm-app-eks",
+    [ValidateSet("base", "zt")]
+    [string]$EnvName = "base",
+    [string]$EvidenceDir = "evaluation/results",
     [switch]$AutoApprove
 )
 
@@ -39,6 +42,46 @@ function Write-Section {
     param([string]$Text)
     Write-Host ""
     Write-Host "==== $Text ===="
+}
+
+function Write-JsonFile {
+    param(
+        [Parameter(Mandatory = $true)][object]$Object,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $Object | ConvertTo-Json -Depth 30 | Out-File -FilePath $Path -Encoding utf8
+}
+
+function Write-DeploymentEvidence {
+    param(
+        [Parameter(Mandatory = $true)][datetime]$StartUtc,
+        [Parameter(Mandatory = $true)][datetime]$EndUtc
+    )
+
+    $repoRoot = Get-RepoRoot
+    $resolvedDir = Join-Path (Join-Path $repoRoot $EvidenceDir) $EnvName
+
+    if (-not (Test-Path $resolvedDir)) {
+        New-Item -ItemType Directory -Path $resolvedDir -Force | Out-Null
+    }
+
+    $seconds = [int][math]::Round(($EndUtc - $StartUtc).TotalSeconds, 0)
+    $evidence = @{
+        action = "deploy"
+        environment = $EnvName
+        region = $Region
+        cluster_name = $ClusterName
+        started_at_utc = $StartUtc.ToString("o")
+        finished_at_utc = $EndUtc.ToString("o")
+        deployment_seconds = $seconds
+        deployment_minutes = [math]::Round($seconds / 60, 2)
+        generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+    }
+
+    $outputPath = Join-Path $resolvedDir "deployment_time_$EnvName.json"
+    Write-JsonFile -Object $evidence -Path $outputPath
+    Write-Host "Evidencia de tiempo de despliegue: $outputPath"
 }
 
 function Write-RuntimeTfvars {
@@ -481,7 +524,14 @@ switch ($Action) {
     "deploy" {
         Require-Command -Name "kubectl"
         Require-Command -Name "helm"
-        Run-Deploy
+        $deployStartUtc = (Get-Date).ToUniversalTime()
+        try {
+            Run-Deploy
+        }
+        finally {
+            $deployEndUtc = (Get-Date).ToUniversalTime()
+            Write-DeploymentEvidence -StartUtc $deployStartUtc -EndUtc $deployEndUtc
+        }
     }
     "stop" {
         Require-Command -Name "kubectl"

@@ -1,4 +1,4 @@
-# Scripts de operación
+﻿# Scripts de operación
 
 Este directorio contiene scripts auxiliares para construir, publicar y operar el despliegue cloud de la aplicación base del TFM.
 
@@ -150,16 +150,20 @@ Acciones soportadas:
 Desde la raíz del repositorio:
 
 ```
-.\scripts\Cloud.ps1 status.\scripts\Cloud.ps1 deploy.\scripts\Cloud.ps1 stop
+.\scripts\Cloud.ps1 -Action status
+.\scripts\Cloud.ps1 -Action deploy
+.\scripts\Cloud.ps1 -Action stop
 ```
 
 ### Parámetros principales
 
 |Parámetro|Descripción|Valor por defecto|
 |---|---|---|
-|`Action`|Acción a ejecutar: `deploy`, `stop` o `status`.|obligatorio|
+|`-Action`|Acción a ejecutar: `deploy`, `stop` o `status`.|obligatorio|
 |`-Region`|Región AWS del despliegue.|`eu-south-2`|
 |`-ClusterName`|Nombre del cluster EKS.|`tfm-app-eks`|
+|`-EnvName`|Entorno asociado a evidencias (`base` o `zt`).|`base`|
+|`-EvidenceDir`|Directorio base donde guardar evidencia de despliegue.|`evaluation/results`|
 |`-AutoApprove`|Ejecuta `terraform apply -auto-approve`.|desactivado|
 
 ### Acción `status`
@@ -169,7 +173,7 @@ Consulta el estado actual del entorno.
 Ejemplo:
 
 ```
-.\scripts\Cloud.ps1 status
+.\scripts\Cloud.ps1 -Action status
 ```
 
 Esta acción muestra:
@@ -190,7 +194,7 @@ Despliega el entorno cloud base completo.
 Ejemplo:
 
 ```
-.\scripts\Cloud.ps1 deploy
+.\scripts\Cloud.ps1 -Action deploy
 ```
 
 Esta acción realiza las siguientes fases:
@@ -222,6 +226,9 @@ Esta acción realiza las siguientes fases:
     - ingress
 11. Espera a que el Ingress tenga un `ADDRESS` asignado por el ALB.
 12. Muestra el estado final de Kubernetes.
+13. Genera evidencia del tiempo de despliegue en:
+    - `evaluation/results/<env>/deployment_time_<env>.json`
+    - ejemplo: `evaluation/results/base/deployment_time_base.json`
 
 ### Acción `stop`
 
@@ -230,7 +237,7 @@ Detiene el entorno cloud eliminando los recursos con coste.
 Ejemplo:
 
 ```
-.\scripts\Cloud.ps1 stop
+.\scripts\Cloud.ps1 -Action stop
 ```
 
 Esta acción realiza las siguientes fases:
@@ -280,13 +287,14 @@ Por defecto, el script deja que Terraform pida confirmación manual.
 Ejemplo:
 
 ```
-.\scripts\Cloud.ps1 deploy
+.\scripts\Cloud.ps1 -Action deploy
 ```
 
 Para automatizar completamente el proceso:
 
 ```
-.\scripts\Cloud.ps1 deploy -AutoApprove.\scripts\Cloud.ps1 stop -AutoApprove
+.\scripts\Cloud.ps1 -Action deploy -AutoApprove
+.\scripts\Cloud.ps1 -Action stop -AutoApprove
 ```
 
 Se recomienda usar `-AutoApprove` únicamente cuando el flujo ya haya sido validado previamente.
@@ -338,13 +346,13 @@ infra/terraform/*.auto.tfvars
 2. Desplegar infraestructura y aplicación:
     
     ```
-    .\scripts\Cloud.ps1 deploy
+    .\scripts\Cloud.ps1 -Action deploy
     ```
     
 3. Consultar estado:
     
     ```
-    .\scripts\Cloud.ps1 status
+    .\scripts\Cloud.ps1 -Action status
     ```
     
 4. Probar la aplicación mediante el DNS del ALB mostrado en el Ingress.
@@ -354,13 +362,13 @@ infra/terraform/*.auto.tfvars
 1. Ejecutar stop:
     
     ```
-    .\scripts\Cloud.ps1 stop
+    .\scripts\Cloud.ps1 -Action stop
     ```
     
 2. Verificar estado:
     
     ```
-    .\scripts\Cloud.ps1 status
+    .\scripts\Cloud.ps1 -Action status
     ```
     
 3. Comprobar que no quedan ALB asociados:
@@ -389,3 +397,4 @@ La acción `stop` debe ejecutarse al finalizar las pruebas para evitar cargos in
 - Las access keys reales no se gestionan con Terraform.
 - El OIDC issuer de EKS se detecta dinámicamente porque cambia cuando se recrea el cluster.
 - El acceso a S3 en la arquitectura base usa credenciales configuradas como Secret de Kubernetes; en una evolución Zero Trust puede sustituirse por IRSA.
+
