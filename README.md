@@ -151,6 +151,14 @@ Documentación específica:
 - [Inventario de AWS](/infra/terraform/INVENTARIO_AWS.md)
 - [Scripts de operación](scripts/README.md)
 
+## Evaluación
+
+La baterí­a de pruebas de evaluación (funcionalidad, seguridad, rendimiento y complejidad/coste), los comandos de ejecuciónn y el formato de evidencias están documentados en:
+
+- [Evaluacion de infraestructuras](evaluation/README.md)
+
+Las evidencias JSON y gráficas se generan en `evaluation/results/<entorno>/` (`base` o `zt`).
+
 ## Variables de entorno principales
 
 Consulta `.env.example` para valores de desarrollo.
