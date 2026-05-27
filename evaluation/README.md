@@ -6,7 +6,7 @@ La evaluación se organiza en cuatro bloques:
 
 - Funcionalidad
 - Seguridad
-- Rendimiento mí­nimo
+- Rendimiento mínimo
 - Complejidad, despliegue y coste
 
 El objetivo es ejecutar una baterí­a común de pruebas sobre ambas versiones de la arquitectura y generar evidencias comparables en formato JSON.
@@ -203,7 +203,7 @@ evaluation/results/base/security_base_2.json
 evaluation/results/zt/security_zt_2.json
 ```
 
-## 3. Pruebas de rendimiento mí­nimo
+## 3. Pruebas de rendimiento mínimo
 
 Script:
 
@@ -226,7 +226,7 @@ Métricas calculadas:
 - Número de iteraciones.
 - Peticiones correctas.
 - Peticiones fallidas.
-- Tiempo mí­nimo.
+- Tiempo mínimo.
 - Tiempo máximo.
 - Tiempo medio.
 - Mediana.
@@ -281,8 +281,8 @@ Casos cubiertos:
 | --- | --- |
 | C1 | Tiempo de despliegue |
 | C2 | Número de recursos cloud desplegados |
-| C3 | Número de polí­ticas IAM, grupos de seguridad y reglas |
-| C4 | Lí­neas de configuración y automatización |
+| C3 | Número de políticas IAM, grupos de seguridad y reglas |
+| C4 | Líneas de configuración y automatización |
 | C5 | Coste mensual teorico |
 
 Costes:
