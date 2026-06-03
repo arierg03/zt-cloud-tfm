@@ -168,7 +168,8 @@ function Invoke-KubectlApply {
         "api.yaml",
         "svc.yaml",
         "web.yaml",
-        "ingress.yaml"
+        "ingress.yaml",
+        "networkpolicy.yaml"
     )
 
     foreach ($file in $files) {
@@ -192,6 +193,7 @@ function Invoke-KubectlDeleteForStop {
 
     $files = @(
         "ingress.yaml",
+        "networkpolicy.yaml",
         "web.yaml",
         "api.yaml",
         "svc.yaml",
@@ -451,7 +453,7 @@ function Run-Deploy {
     Wait-ForIngressAddress
 
     Write-Section "Kubernetes status"
-    kubectl -n tfm-app get pods,svc,ingress
+    kubectl -n tfm-app get pods,svc,ingress,networkpolicy
 }
 
 function Run-Stop {
