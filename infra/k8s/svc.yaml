@@ -10,6 +10,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          serviceAccountName: svc
           containers:
             - name: svc
               image: 296368270177.dkr.ecr.eu-south-2.amazonaws.com/zt/svc:latest
@@ -70,15 +71,5 @@ spec:
                     configMapKeyRef:
                       name: tfm-app-config
                       key: S3_USE_SSL
-                - name: S3_ACCESS_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: tfm-app-secret
-                      key: S3_ACCESS_KEY
-                - name: S3_SECRET_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: tfm-app-secret
-                      key: S3_SECRET_KEY
                 - name: PYTHONUNBUFFERED
                   value: "1"

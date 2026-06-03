@@ -164,6 +164,7 @@ function Invoke-KubectlApply {
         "namespace.yaml",
         "secret.local.yaml",
         "configmap.yaml",
+        "serviceaccounts.yaml",
         "api.yaml",
         "svc.yaml",
         "web.yaml",
@@ -194,6 +195,7 @@ function Invoke-KubectlDeleteForStop {
         "web.yaml",
         "api.yaml",
         "svc.yaml",
+        "serviceaccounts.yaml",
         "configmap.yaml",
         "aws-lbc-sa.yaml",
         "secret.local.yaml"

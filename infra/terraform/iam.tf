@@ -1,48 +1,3 @@
-resource "aws_iam_user" "s3_user" {
-  name = "tfm-app-s3-user"
-
-  tags = merge(local.common_tags, {
-    Name = "tfm-app-s3-user"
-  })
-}
-
-resource "aws_iam_policy" "s3_user" {
-  name = "tfm-app-s3-user-policy"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "ListBucket"
-        Effect = "Allow"
-        Action = [
-          "s3:ListBucket"
-        ]
-        Resource = aws_s3_bucket.images.arn
-      },
-      {
-        Sid    = "ObjectAccess"
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject"
-        ]
-        Resource = "${aws_s3_bucket.images.arn}/*"
-      }
-    ]
-  })
-
-  tags = merge(local.common_tags, {
-    Name = "tfm-app-s3-user-policy"
-  })
-}
-
-resource "aws_iam_user_policy_attachment" "s3_user" {
-  user       = aws_iam_user.s3_user.name
-  policy_arn = aws_iam_policy.s3_user.arn
-}
-
 resource "aws_iam_openid_connect_provider" "eks" {
   url = var.eks_oidc_issuer_url
 
@@ -167,23 +122,21 @@ resource "aws_iam_role_policy_attachment" "eks_ecr_readonly" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
-resource "aws_iam_role_policy" "eks_nodes_s3" {
-  name = "tfm-app-node-s3-policy"
-  role = aws_iam_role.eks_nodes.id
+resource "aws_iam_policy" "api_s3_images" {
+  name        = "tfm-app-api-s3-images-policy"
+  description = "S3 permissions for API workload using IRSA"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ListBucket"
-        Effect = "Allow"
-        Action = [
-          "s3:ListBucket"
-        ]
+        Sid      = "ListImagesBucket"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.images.arn
       },
       {
-        Sid    = "ObjectAccess"
+        Sid    = "ApiImageObjectAccess"
         Effect = "Allow"
         Action = [
           "s3:GetObject",
@@ -194,4 +147,104 @@ resource "aws_iam_role_policy" "eks_nodes_s3" {
       }
     ]
   })
+
+  tags = merge(local.common_tags, {
+    Name = "tfm-app-api-s3-images-policy"
+  })
+}
+
+resource "aws_iam_policy" "svc_s3_images" {
+  name        = "tfm-app-svc-s3-images-policy"
+  description = "S3 permissions for batch service using IRSA"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ListImagesBucket"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.images.arn
+      },
+      {
+        Sid    = "SvcImageObjectAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject"
+        ]
+        Resource = "${aws_s3_bucket.images.arn}/*"
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "tfm-app-svc-s3-images-policy"
+  })
+}
+
+resource "aws_iam_role" "api_irsa" {
+  name        = "tfm-app-api-irsa-role"
+  description = "IRSA role for api service account"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.eks.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "${local.eks_oidc_provider_hostpath}:aud" = "sts.amazonaws.com"
+            "${local.eks_oidc_provider_hostpath}:sub" = "system:serviceaccount:tfm-app:api"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "tfm-app-api-irsa-role"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "api_s3_images" {
+  role       = aws_iam_role.api_irsa.name
+  policy_arn = aws_iam_policy.api_s3_images.arn
+}
+
+resource "aws_iam_role" "svc_irsa" {
+  name        = "tfm-app-svc-irsa-role"
+  description = "IRSA role for svc service account"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.eks.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "${local.eks_oidc_provider_hostpath}:aud" = "sts.amazonaws.com"
+            "${local.eks_oidc_provider_hostpath}:sub" = "system:serviceaccount:tfm-app:svc"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "tfm-app-svc-irsa-role"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "svc_s3_images" {
+  role       = aws_iam_role.svc_irsa.name
+  policy_arn = aws_iam_policy.svc_s3_images.arn
 }
