@@ -5,15 +5,35 @@ metadata:
   namespace: tfm-app
 spec:
   schedule: "0 0 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
       template:
         spec:
           restartPolicy: OnFailure
           serviceAccountName: svc
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: svc
               image: 296368270177.dkr.ecr.eu-south-2.amazonaws.com/zt/svc:latest
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
               env:
                 - name: DATABASE_URL
                   valueFrom:
