@@ -5,4 +5,5 @@ locals {
     ManagedBy   = "Terraform"
   }
   eks_oidc_provider_hostpath = replace(var.eks_oidc_issuer_url, "https://", "")
+  create_admin_bastion       = var.create_eks && var.create_admin_bastion
 }

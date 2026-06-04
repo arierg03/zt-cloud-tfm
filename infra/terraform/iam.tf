@@ -248,3 +248,62 @@ resource "aws_iam_role_policy_attachment" "svc_s3_images" {
   role       = aws_iam_role.svc_irsa.name
   policy_arn = aws_iam_policy.svc_s3_images.arn
 }
+
+resource "aws_iam_role" "admin_bastion" {
+  count = local.create_admin_bastion ? 1 : 0
+
+  name        = "tfm-app-admin-bastion-role"
+  description = "IAM role for the private EKS administration bastion"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "tfm-app-admin-bastion-role"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "admin_bastion_ssm" {
+  count = local.create_admin_bastion ? 1 : 0
+
+  role       = aws_iam_role.admin_bastion[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy" "admin_bastion_eks" {
+  count = local.create_admin_bastion ? 1 : 0
+
+  name = "tfm-app-admin-bastion-eks-policy"
+  role = aws_iam_role.admin_bastion[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DescribeEksCluster"
+        Effect = "Allow"
+        Action = [
+          "eks:DescribeCluster"
+        ]
+        Resource = aws_eks_cluster.main[0].arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "admin_bastion" {
+  count = local.create_admin_bastion ? 1 : 0
+
+  name = "tfm-app-admin-bastion-profile"
+  role = aws_iam_role.admin_bastion[0].name
+}

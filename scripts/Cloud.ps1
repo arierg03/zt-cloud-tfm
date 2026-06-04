@@ -8,6 +8,7 @@ param(
     [ValidateSet("base", "zt")]
     [string]$EnvName = "base",
     [string]$EvidenceDir = "evaluation/results",
+    [switch]$AdminBastion,
     [switch]$AutoApprove
 )
 
@@ -89,6 +90,7 @@ function Write-RuntimeTfvars {
         [bool]$CreateEks,
         [bool]$CreateRds,
         [bool]$CreateNat,
+        [bool]$CreateAdminBastion = $false,
         [string]$EksOidcIssuerUrl = ""
     )
 
@@ -98,7 +100,8 @@ function Write-RuntimeTfvars {
     $lines = @(
         "create_eks = $($CreateEks.ToString().ToLower())",
         "create_rds = $($CreateRds.ToString().ToLower())",
-        "create_nat = $($CreateNat.ToString().ToLower())"
+        "create_nat = $($CreateNat.ToString().ToLower())",
+        "create_admin_bastion = $($CreateAdminBastion.ToString().ToLower())"
     )
 
     if ($EksOidcIssuerUrl -eq "" -and (Test-Path $tfvarsPath)) {
@@ -400,7 +403,7 @@ function Run-Deploy {
     Write-Section "Deploy cloud"
 
     Write-Section "Activar infraestructura base con coste"
-    Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true
+    Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true -CreateAdminBastion $AdminBastion.IsPresent
 
     Write-Section "Terraform init"
     Invoke-Terraform @("init")
@@ -427,7 +430,7 @@ function Run-Deploy {
     Write-Host "OIDC issuer: $oidcIssuer"
 
     Write-Section "Actualizar runtime.auto.tfvars con OIDC"
-    Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true -EksOidcIssuerUrl $oidcIssuer
+    Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true -CreateAdminBastion $AdminBastion.IsPresent -EksOidcIssuerUrl $oidcIssuer
 
     Write-Section "Terraform apply IAM/OIDC"
     if ($AutoApprove) {
@@ -480,7 +483,7 @@ function Run-Stop {
         Write-Warning "El cluster EKS $ClusterName no existe. Se omite borrado de manifiestos Kubernetes."
     }
 
-    Write-RuntimeTfvars -CreateEks $false -CreateRds $false -CreateNat $false -EksOidcIssuerUrl $oidcIssuer
+    Write-RuntimeTfvars -CreateEks $false -CreateRds $false -CreateNat $false -CreateAdminBastion $false -EksOidcIssuerUrl $oidcIssuer
 
     Write-Section "Terraform apply"
     if ($AutoApprove) {

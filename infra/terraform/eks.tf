@@ -134,3 +134,27 @@ resource "aws_eks_node_group" "main" {
     Name = "tfm-app-ng"
   })
 }
+
+resource "aws_eks_access_entry" "admin_bastion" {
+  count = local.create_admin_bastion ? 1 : 0
+
+  cluster_name  = aws_eks_cluster.main[0].name
+  principal_arn = aws_iam_role.admin_bastion[0].arn
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "admin_bastion_admin" {
+  count = local.create_admin_bastion ? 1 : 0
+
+  cluster_name  = aws_eks_cluster.main[0].name
+  principal_arn = aws_iam_role.admin_bastion[0].arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [
+    aws_eks_access_entry.admin_bastion
+  ]
+}

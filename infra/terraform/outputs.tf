@@ -85,3 +85,18 @@ output "nat_gateway_id" {
   description = "ID de la NAT Gateway, si está creada"
   value       = var.create_nat ? aws_nat_gateway.main[0].id : null
 }
+
+output "admin_bastion_instance_id" {
+  description = "ID de la instancia privada de administracion, si esta creada"
+  value       = local.create_admin_bastion ? aws_instance.admin_bastion[0].id : null
+}
+
+output "admin_bastion_private_ip" {
+  description = "IP privada de la instancia privada de administracion, si esta creada"
+  value       = local.create_admin_bastion ? aws_instance.admin_bastion[0].private_ip : null
+}
+
+output "admin_bastion_role_name" {
+  description = "Nombre del rol IAM asociado a la instancia privada de administracion"
+  value       = local.create_admin_bastion ? aws_iam_role.admin_bastion[0].name : null
+}

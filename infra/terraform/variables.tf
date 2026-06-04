@@ -53,6 +53,12 @@ variable "create_eks" {
   default     = false
 }
 
+variable "create_admin_bastion" {
+  description = "Indica si se debe crear la instancia privada de administracion de EKS mediante SSM"
+  type        = bool
+  default     = false
+}
+
 variable "eks_oidc_issuer_url" {
   description = "URL del issuer OIDC del cluster EKS"
   type        = string
