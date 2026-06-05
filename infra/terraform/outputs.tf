@@ -100,3 +100,8 @@ output "admin_bastion_role_name" {
   description = "Nombre del rol IAM asociado a la instancia privada de administracion"
   value       = local.create_admin_bastion ? aws_iam_role.admin_bastion[0].name : null
 }
+
+output "k8s_artifacts_bucket_name" {
+  description = "Nombre del bucket S3 para artefactos temporales de Kubernetes"
+  value       = aws_s3_bucket.k8s_artifacts.bucket
+}

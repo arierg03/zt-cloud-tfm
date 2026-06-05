@@ -11,3 +11,8 @@ fi
 
 chmod 0755 /usr/local/bin/kubectl
 /usr/local/bin/kubectl version --client
+
+curl -fsSL -o /tmp/helm-linux-amd64.tar.gz https://get.helm.sh/helm-v3.15.4-linux-amd64.tar.gz
+tar -xzf /tmp/helm-linux-amd64.tar.gz -C /tmp
+install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+/usr/local/bin/helm version --short

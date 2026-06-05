@@ -47,6 +47,7 @@ resource "aws_instance" "admin_bastion" {
   depends_on = [
     aws_iam_role_policy_attachment.admin_bastion_ssm,
     aws_iam_role_policy.admin_bastion_eks,
+    aws_iam_role_policy.admin_bastion_k8s_artifacts,
     aws_eks_access_policy_association.admin_bastion_admin
   ]
 }

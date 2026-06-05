@@ -301,6 +301,42 @@ resource "aws_iam_role_policy" "admin_bastion_eks" {
   })
 }
 
+resource "aws_iam_role_policy" "admin_bastion_k8s_artifacts" {
+  count = local.create_admin_bastion ? 1 : 0
+
+  name = "tfm-app-admin-bastion-k8s-artifacts-policy"
+  role = aws_iam_role.admin_bastion[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ListK8sArtifacts"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = aws_s3_bucket.k8s_artifacts.arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = [
+              "manifests/*"
+            ]
+          }
+        }
+      },
+      {
+        Sid    = "ReadK8sArtifacts"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject"
+        ]
+        Resource = "${aws_s3_bucket.k8s_artifacts.arn}/manifests/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "admin_bastion" {
   count = local.create_admin_bastion ? 1 : 0
 

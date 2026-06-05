@@ -9,6 +9,8 @@ param(
     [string]$EnvName = "base",
     [string]$EvidenceDir = "evaluation/results",
     [switch]$AdminBastion,
+    [switch]$SkipKubernetes,
+    [switch]$RemoteKubernetes,
     [switch]$AutoApprove
 )
 
@@ -157,6 +159,198 @@ function Invoke-Terraform {
     finally {
         Pop-Location
     }
+}
+
+function Get-TerraformOutputRaw {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $repoRoot = Get-RepoRoot
+    $tfDir = Join-Path $repoRoot "infra\terraform"
+
+    Push-Location $tfDir
+    try {
+        $value = & terraform output -raw $Name
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "No se pudo obtener terraform output $Name"
+        }
+
+        return $value.Trim()
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function New-K8sManifestsPackage {
+    $repoRoot = Get-RepoRoot
+    $k8sDir = Join-Path $repoRoot "infra\k8s"
+
+    if (-not (Test-Path $k8sDir)) {
+        throw "No existe $k8sDir"
+    }
+
+    $packageDir = Join-Path ([System.IO.Path]::GetTempPath()) "tfm-k8s-artifacts"
+    if (-not (Test-Path $packageDir)) {
+        New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+    }
+
+    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmss")
+    $packagePath = Join-Path $packageDir "k8s-manifests-$timestamp.zip"
+
+    if (Test-Path $packagePath) {
+        Remove-Item -Path $packagePath -Force
+    }
+
+    Compress-Archive -Path (Join-Path $k8sDir "*") -DestinationPath $packagePath -Force
+    return $packagePath
+}
+
+function Publish-K8sManifestsPackage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PackagePath,
+        [Parameter(Mandatory = $true)]
+        [string]$BucketName
+    )
+
+    $key = "manifests/$(Split-Path -Leaf $PackagePath)"
+    $uploadOutput = aws s3 cp $PackagePath "s3://$BucketName/$key" --region $Region --only-show-errors 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "No se pudo subir $PackagePath a s3://$BucketName/$key. $uploadOutput"
+    }
+
+    return $key
+}
+
+function Invoke-SsmShellCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InstanceId,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Commands,
+        [string]$Comment = "tfm remote kubernetes operation",
+        [switch]$ShowOutput
+    )
+
+    $request = @{
+        DocumentName = "AWS-RunShellScript"
+        InstanceIds  = @($InstanceId)
+        Comment      = $Comment
+        Parameters   = @{
+            commands = $Commands
+        }
+    }
+
+    $previousPythonIoEncoding = $env:PYTHONIOENCODING
+    $env:PYTHONIOENCODING = "utf-8"
+    $requestPath = Join-Path ([System.IO.Path]::GetTempPath()) "tfm-ssm-command-$([guid]::NewGuid()).json"
+    $requestJson = $request | ConvertTo-Json -Depth 10
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($requestPath, $requestJson, $utf8NoBom)
+
+    try {
+        $sendResult = aws ssm send-command --region $Region --cli-input-json "file://$requestPath" --output json | ConvertFrom-Json
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "No se pudo enviar comando SSM al bastion $InstanceId"
+        }
+
+        $commandId = $sendResult.Command.CommandId
+        Write-Host "SSM command id: $commandId"
+
+        aws ssm wait command-executed --region $Region --command-id $commandId --instance-id $InstanceId
+        $waitExitCode = $LASTEXITCODE
+
+        $status = aws ssm get-command-invocation `
+            --region $Region `
+            --command-id $commandId `
+            --instance-id $InstanceId `
+            --query "Status" `
+            --output text
+
+        $responseCode = aws ssm get-command-invocation `
+            --region $Region `
+            --command-id $commandId `
+            --instance-id $InstanceId `
+            --query "ResponseCode" `
+            --output text
+
+        if ($ShowOutput -or $status -ne "Success" -or $responseCode -ne "0") {
+            $stdout = aws ssm get-command-invocation `
+                --region $Region `
+                --command-id $commandId `
+                --instance-id $InstanceId `
+                --query "StandardOutputContent" `
+                --output text 2>$null
+
+            if ($LASTEXITCODE -eq 0 -and $stdout -and $stdout -ne "None") {
+                Write-Host ($stdout -join [Environment]::NewLine)
+            }
+
+            $stderr = aws ssm get-command-invocation `
+                --region $Region `
+                --command-id $commandId `
+                --instance-id $InstanceId `
+                --query "StandardErrorContent" `
+                --output text 2>$null
+
+            if ($LASTEXITCODE -eq 0 -and $stderr -and $stderr -ne "None") {
+                Write-Warning ($stderr -join [Environment]::NewLine)
+            }
+        }
+
+        if ($waitExitCode -ne 0 -or $status -ne "Success" -or $responseCode -ne "0") {
+            throw "El comando SSM fallo con estado $status y codigo $responseCode"
+        }
+
+        Write-Host "Comando SSM completado correctamente."
+    }
+    finally {
+        if (Test-Path $requestPath) {
+            Remove-Item -Path $requestPath -Force
+        }
+
+        if ($null -eq $previousPythonIoEncoding) {
+            Remove-Item Env:\PYTHONIOENCODING -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:PYTHONIOENCODING = $previousPythonIoEncoding
+        }
+    }
+}
+
+function Wait-ForSsmManagedInstance {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InstanceId,
+        [int]$TimeoutSeconds = 300
+    )
+
+    $elapsed = 0
+
+    while ($elapsed -lt $TimeoutSeconds) {
+        $managedInstance = aws ssm describe-instance-information `
+            --region $Region `
+            --filters "Key=InstanceIds,Values=$InstanceId" `
+            --query "InstanceInformationList[0].InstanceId" `
+            --output text
+
+        if ($LASTEXITCODE -eq 0 -and $managedInstance -eq $InstanceId) {
+            Write-Host "Bastion registrado en SSM: $InstanceId"
+            return
+        }
+
+        Write-Host "Esperando registro SSM del bastion... ${elapsed}s/${TimeoutSeconds}s"
+        Start-Sleep -Seconds 15
+        $elapsed += 15
+    }
+
+    throw "Timeout esperando a que el bastion $InstanceId se registre en SSM"
 }
 
 function Invoke-KubectlApply {
@@ -399,11 +593,113 @@ function Wait-ForLoadBalancerController {
     }
 }
 
+function Write-SkipKubernetesNotice {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("deploy", "stop", "status")]
+        [string]$Action
+    )
+
+    Write-Warning "Modo SkipKubernetes activo: se omiten operaciones locales de kubeconfig, kubectl y helm."
+
+    if ($Action -eq "deploy") {
+        Write-Host "Aplica los manifiestos Kubernetes desde el bastion privado mediante SSM."
+    }
+    elseif ($Action -eq "stop") {
+        Write-Host "Antes de destruir infraestructura, borra los recursos Kubernetes desde el bastion privado si el cluster sigue activo."
+    }
+}
+
+function Write-RemoteKubernetesNotice {
+    Write-Host "Modo RemoteKubernetes activo: las operaciones kubectl y helm se ejecutan en el bastion privado mediante SSM."
+}
+
+function Invoke-RemoteKubernetesDeploy {
+    Write-Section "Publicar manifiestos Kubernetes en S3"
+    $bucketName = Get-TerraformOutputRaw -Name "k8s_artifacts_bucket_name"
+    $instanceId = Get-TerraformOutputRaw -Name "admin_bastion_instance_id"
+    $packagePath = New-K8sManifestsPackage
+    $s3Key = Publish-K8sManifestsPackage -PackagePath $packagePath -BucketName $bucketName
+
+    Write-Host "Artefacto Kubernetes: s3://$bucketName/$s3Key"
+    Write-Host "Bastion privado: $instanceId"
+    Wait-ForSsmManagedInstance -InstanceId $instanceId
+
+    $commands = @(
+        'set -euo pipefail',
+        'workdir=/tmp/tfm-k8s',
+        'rm -rf "${workdir}"',
+        'mkdir -p "${workdir}"/manifests',
+        ('aws s3 cp "s3://{0}/{1}" "${{workdir}}"/k8s-manifests.zip --region {2}' -f $bucketName, $s3Key, $Region),
+        'python3 -m zipfile -e "${workdir}"/k8s-manifests.zip "${workdir}"/manifests',
+        'export KUBECONFIG="${workdir}"/kubeconfig',
+        ('aws eks update-kubeconfig --region {0} --name {1} --kubeconfig "${{KUBECONFIG}}"' -f $Region, $ClusterName),
+        'manifests="${workdir}"/manifests',
+        'if [ -f "${manifests}"/aws-lbc-sa.yaml ]; then kubectl apply -f "${manifests}"/aws-lbc-sa.yaml; fi',
+        'helm repo add eks https://aws.github.io/eks-charts || true',
+        'helm repo update',
+        ('helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller -n kube-system --set clusterName={0} --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller --set region={1} --set vpcId=vpc-036af3ec3778f5b1c >/tmp/tfm-helm-upgrade.out' -f $ClusterName, $Region),
+        'kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=300s',
+        'for file in namespace.yaml secret.local.yaml configmap.yaml serviceaccounts.yaml api.yaml svc.yaml web.yaml ingress.yaml networkpolicy.yaml; do if [ -f "${manifests}/${file}" ]; then kubectl apply -f "${manifests}/${file}"; else echo "No existe ${file}. Se omite."; fi; done',
+        'for i in $(seq 1 40); do address=$(kubectl -n tfm-app get ingress tfm-app-ingress -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" 2>/dev/null || true); if [ -n "${address}" ]; then echo "Ingress disponible: http://${address}"; break; fi; echo "Esperando ADDRESS del Ingress... ${i}/40"; sleep 15; done',
+        'kubectl -n tfm-app get pods,svc,ingress,networkpolicy'
+    )
+
+    Write-Section "Ejecutar Kubernetes remoto via SSM"
+    Invoke-SsmShellCommand -InstanceId $instanceId -Commands $commands -Comment "tfm remote kubernetes deploy"
+}
+
+function Invoke-RemoteKubernetesStop {
+    Write-Section "Borrar Kubernetes remoto via SSM"
+    $instanceId = Get-TerraformOutputRaw -Name "admin_bastion_instance_id"
+    Write-Host "Bastion privado: $instanceId"
+    Wait-ForSsmManagedInstance -InstanceId $instanceId
+
+    $commands = @(
+        'set -euo pipefail',
+        'workdir=/tmp/tfm-k8s-stop',
+        'mkdir -p "${workdir}"',
+        'export KUBECONFIG="${workdir}"/kubeconfig',
+        ('aws eks update-kubeconfig --region {0} --name {1} --kubeconfig "${{KUBECONFIG}}"' -f $Region, $ClusterName),
+        'kubectl -n tfm-app delete ingress tfm-app-ingress --ignore-not-found=true',
+        'for i in $(seq 1 40); do if ! kubectl -n tfm-app get ingress tfm-app-ingress >/dev/null 2>&1; then echo "Ingress eliminado."; break; fi; echo "Esperando eliminacion del Ingress... ${i}/40"; sleep 15; done',
+        'kubectl -n tfm-app delete networkpolicy --all --ignore-not-found=true',
+        'kubectl -n tfm-app delete deployment api web --ignore-not-found=true',
+        'kubectl -n tfm-app delete service api web svc --ignore-not-found=true',
+        'kubectl -n tfm-app delete serviceaccount api svc --ignore-not-found=true',
+        'kubectl -n tfm-app delete configmap --all --ignore-not-found=true',
+        'kubectl -n tfm-app delete secret --all --ignore-not-found=true',
+        'kubectl -n kube-system delete serviceaccount aws-load-balancer-controller --ignore-not-found=true'
+    )
+
+    Invoke-SsmShellCommand -InstanceId $instanceId -Commands $commands -Comment "tfm remote kubernetes stop"
+}
+
+function Invoke-RemoteKubernetesStatus {
+    Write-Section "Kubernetes status remoto via SSM"
+    $instanceId = Get-TerraformOutputRaw -Name "admin_bastion_instance_id"
+    Write-Host "Bastion privado: $instanceId"
+    Wait-ForSsmManagedInstance -InstanceId $instanceId
+
+    $commands = @(
+        'set -euo pipefail',
+        'workdir=/tmp/tfm-k8s-status',
+        'mkdir -p "${workdir}"',
+        'export KUBECONFIG="${workdir}"/kubeconfig',
+        ('aws eks update-kubeconfig --region {0} --name {1} --kubeconfig "${{KUBECONFIG}}"' -f $Region, $ClusterName),
+        'kubectl get nodes',
+        'kubectl -n tfm-app get pods,svc,ingress,networkpolicy',
+        'kubectl -n kube-system get deployment aws-load-balancer-controller'
+    )
+
+    Invoke-SsmShellCommand -InstanceId $instanceId -Commands $commands -Comment "tfm remote kubernetes status" -ShowOutput
+}
+
 function Run-Deploy {
     Write-Section "Deploy cloud"
 
     Write-Section "Activar infraestructura base con coste"
-    Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true -CreateAdminBastion $AdminBastion.IsPresent
+    Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true -CreateAdminBastion ($AdminBastion.IsPresent -or $RemoteKubernetes.IsPresent)
 
     Write-Section "Terraform init"
     Invoke-Terraform @("init")
@@ -422,15 +718,23 @@ function Run-Deploy {
         Invoke-Terraform @("apply")
     }
 
-    Write-Section "Actualizar kubeconfig"
-    Update-Kubeconfig -Region $Region -ClusterName $ClusterName
+    if (-not $SkipKubernetes -and -not $RemoteKubernetes) {
+        Write-Section "Actualizar kubeconfig"
+        Update-Kubeconfig -Region $Region -ClusterName $ClusterName
+    }
+    elseif ($RemoteKubernetes) {
+        Write-RemoteKubernetesNotice
+    }
+    else {
+        Write-SkipKubernetesNotice -Action "deploy"
+    }
 
     Write-Section "Detectar OIDC issuer del cluster"
     $oidcIssuer = Get-EksOidcIssuerUrl -Region $Region -ClusterName $ClusterName
     Write-Host "OIDC issuer: $oidcIssuer"
 
     Write-Section "Actualizar runtime.auto.tfvars con OIDC"
-    Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true -CreateAdminBastion $AdminBastion.IsPresent -EksOidcIssuerUrl $oidcIssuer
+    Write-RuntimeTfvars -CreateEks $true -CreateRds $true -CreateNat $true -CreateAdminBastion ($AdminBastion.IsPresent -or $RemoteKubernetes.IsPresent) -EksOidcIssuerUrl $oidcIssuer
 
     Write-Section "Terraform apply IAM/OIDC"
     if ($AutoApprove) {
@@ -438,6 +742,17 @@ function Run-Deploy {
     }
     else {
         Invoke-Terraform @("apply")
+    }
+
+    if ($RemoteKubernetes) {
+        Invoke-RemoteKubernetesDeploy
+        return
+    }
+
+    if ($SkipKubernetes) {
+        Write-Section "Kubernetes omitido"
+        Write-Host "Infraestructura desplegada. Ejecuta la parte Kubernetes desde el bastion privado."
+        return
     }
 
     Write-Section "Aplicar ServiceAccount del Load Balancer Controller"
@@ -465,19 +780,27 @@ function Run-Stop {
     $oidcIssuer = ""
 
     if (Test-EksClusterExists -Region $Region -ClusterName $ClusterName) {
-        Write-Section "Update kubeconfig"
-        Update-Kubeconfig -Region $Region -ClusterName $ClusterName
-
         Write-Section "Detectar OIDC issuer actual"
         $oidcIssuer = Get-EksOidcIssuerUrl -Region $Region -ClusterName $ClusterName
         Write-Host "OIDC issuer: $oidcIssuer"
 
-        Write-Section "Delete Kubernetes resources"
-        Invoke-KubectlDeleteForStop
+        if ($RemoteKubernetes) {
+            Invoke-RemoteKubernetesStop
+        }
+        elseif ($SkipKubernetes) {
+            Write-SkipKubernetesNotice -Action "stop"
+        }
+        else {
+            Write-Section "Update kubeconfig"
+            Update-Kubeconfig -Region $Region -ClusterName $ClusterName
 
-        Write-Host ""
-        Write-Host "Esperando 60 segundos para que AWS Load Balancer Controller elimine recursos externos..."
-        Start-Sleep -Seconds 60
+            Write-Section "Delete Kubernetes resources"
+            Invoke-KubectlDeleteForStop
+
+            Write-Host ""
+            Write-Host "Esperando 60 segundos para que AWS Load Balancer Controller elimine recursos externos..."
+            Start-Sleep -Seconds 60
+        }
     }
     else {
         Write-Warning "El cluster EKS $ClusterName no existe. Se omite borrado de manifiestos Kubernetes."
@@ -505,12 +828,20 @@ function Run-Status {
     if (Test-EksClusterExists -Region $Region -ClusterName $ClusterName) {
         aws eks describe-cluster --region $Region --name $ClusterName --query "cluster.{name:name,status:status,version:version}" --output table
 
-        try {
-            Update-Kubeconfig -Region $Region -ClusterName $ClusterName
-            kubectl -n tfm-app get pods,svc,ingress
+        if ($SkipKubernetes) {
+            Write-SkipKubernetesNotice -Action "status"
         }
-        catch {
-            Write-Warning "No se pudo consultar Kubernetes: $($_.Exception.Message)"
+        elseif ($RemoteKubernetes) {
+            Invoke-RemoteKubernetesStatus
+        }
+        else {
+            try {
+                Update-Kubeconfig -Region $Region -ClusterName $ClusterName
+                kubectl -n tfm-app get pods,svc,ingress
+            }
+            catch {
+                Write-Warning "No se pudo consultar Kubernetes: $($_.Exception.Message)"
+            }
         }
     }
     else {
@@ -527,10 +858,16 @@ function Run-Status {
 Require-Command -Name "aws"
 Require-Command -Name "terraform"
 
+if ($SkipKubernetes -and $RemoteKubernetes) {
+    throw "No se pueden usar -SkipKubernetes y -RemoteKubernetes a la vez."
+}
+
 switch ($Action) {
     "deploy" {
-        Require-Command -Name "kubectl"
-        Require-Command -Name "helm"
+        if (-not $SkipKubernetes -and -not $RemoteKubernetes) {
+            Require-Command -Name "kubectl"
+            Require-Command -Name "helm"
+        }
         $deployStartUtc = (Get-Date).ToUniversalTime()
         try {
             Run-Deploy
@@ -541,7 +878,9 @@ switch ($Action) {
         }
     }
     "stop" {
-        Require-Command -Name "kubectl"
+        if (-not $SkipKubernetes -and -not $RemoteKubernetes) {
+            Require-Command -Name "kubectl"
+        }
         Run-Stop
     }
     "status" {
