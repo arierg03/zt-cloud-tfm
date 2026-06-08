@@ -105,3 +105,18 @@ output "k8s_artifacts_bucket_name" {
   description = "Nombre del bucket S3 para artefactos temporales de Kubernetes"
   value       = aws_s3_bucket.k8s_artifacts.bucket
 }
+
+output "cloudtrail_name" {
+  description = "Nombre del CloudTrail de auditoria Zero Trust"
+  value       = aws_cloudtrail.zt_audit.name
+}
+
+output "cloudtrail_arn" {
+  description = "ARN del CloudTrail de auditoria Zero Trust"
+  value       = aws_cloudtrail.zt_audit.arn
+}
+
+output "cloudtrail_logs_bucket_name" {
+  description = "Nombre del bucket S3 dedicado a logs de CloudTrail"
+  value       = aws_s3_bucket.cloudtrail_logs.bucket
+}
