@@ -21,6 +21,7 @@ Terraform gestiona recursos como:
 - Roles y politicas IAM.
 - OIDC Provider e IRSA.
 - EKS, RDS, NAT Gateway y bastion privado de administracion.
+- CloudTrail y bucket S3 dedicado para logs de auditoria.
 
 Los manifiestos de este directorio se aplican sobre el cluster EKS una vez que la infraestructura esta disponible.
 

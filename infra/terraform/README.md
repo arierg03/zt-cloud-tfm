@@ -8,8 +8,10 @@ Este directorio contiene la definicion Terraform de la infraestructura AWS utili
 - Repositorios ECR para las imagenes `api`, `web` y `svc`.
 - Bucket S3 de imagenes de la aplicacion.
 - Bucket S3 privado para artefactos Kubernetes usados por la administracion remota desde bastion.
+- Bucket S3 dedicado para logs de CloudTrail.
 - Recursos IAM asociados a EKS, S3, AWS Load Balancer Controller, workloads con IRSA y bastion de administracion.
 - Security Groups y reglas para RDS, EKS, node group y bastion.
+- CloudTrail de auditoria Zero Trust.
 - Definiciones opcionales de RDS, NAT Gateway, EKS y bastion privado.
 
 ## Recursos opcionales
@@ -54,12 +56,46 @@ Controles aplicados:
 - Ciclo de vida para expirar artefactos bajo `manifests/`.
 - Permisos IAM limitados al rol del bastion para listar y leer objetos necesarios.
 
+## Auditoria con CloudTrail
+
+Terraform crea un CloudTrail de auditoria Zero Trust llamado:
+
+```text
+tfm-app-zt-audit-trail
+```
+
+El trail registra eventos de gestion de lectura y escritura, incluye eventos globales de servicios AWS, se configura como multi-region y activa la validacion de integridad de los ficheros de log.
+
+Los logs se entregan en un bucket S3 dedicado con nombre derivado del proyecto, cuenta y region:
+
+```text
+tfm-app-cloudtrail-<account-id>-<region>
+```
+
+Controles aplicados al bucket:
+
+- Bloqueo de acceso publico.
+- Cifrado en reposo SSE-S3.
+- Versionado habilitado.
+- Ownership `BucketOwnerPreferred`.
+- Politica de bucket limitada al servicio CloudTrail y al ARN del trail.
+- Ciclo de vida para expirar logs bajo `AWSLogs/` y versiones no actuales a los 30 dias.
+
+Terraform expone como outputs el nombre y ARN del trail, ademas del nombre del bucket de logs:
+
+```text
+cloudtrail_name
+cloudtrail_arn
+cloudtrail_logs_bucket_name
+```
+
 ## Bloques Zero Trust reflejados en Terraform
 
 - IRSA para workloads: roles IAM y trust policies asociados a ServiceAccounts de Kubernetes.
 - Segmentacion: Security Groups y reglas que complementan las NetworkPolicies del cluster.
 - Endurecimiento: soporte de infraestructura para ejecutar workloads con configuracion Kubernetes reforzada.
 - Plano de control privado: endpoint publico de EKS deshabilitado y operacion por bastion privado via SSM.
+- Auditoria: CloudTrail multi-region con validacion de logs y almacenamiento segregado en S3.
 
 ## Comandos habituales
 

@@ -1,4 +1,4 @@
-# Inventario AWS - despliegue base
+# Inventario AWS - despliegue Zero Trust
 
 ## Región
 eu-south-2
@@ -77,6 +77,7 @@ eu-south-2
 - Descripción: creado automáticamente por EKS para el plano de control y workloads gestionados.
 - Reglas de entrada:
   - TCP 8000-8080 desde sg-087a5a2460bd28898
+  - TCP 443 desde tfm-app-admin-bastion-sg
 - Reglas de salida:
   - Todo el tráfico hacia 0.0.0.0/0
 - Observación: recurso gestionado por EKS. No se modifica manualmente por ahora.
@@ -110,6 +111,20 @@ eu-south-2
 - Reglas de salida:
   - Todo el tráfico hacia 0.0.0.0/0
 - Observación: security group por defecto de la VPC. No se utiliza explícitamente para la aplicación.
+
+### Admin Bastion Security Group
+- ID: sg-08aadfd87dc8b273e
+- Nombre: tfm-app-admin-bastion-sg
+- Descripción: Private administration bastion for EKS via SSM
+- Uso: controlar la salida de la instancia privada de administración usada para operar EKS.
+- Reglas de entrada:
+  - Ninguna regla de entrada.
+- Reglas de salida:
+  - TCP 443 hacia 0.0.0.0/0 para SSM, APIs de AWS y endpoint privado de EKS.
+  - UDP 53 hacia el resolver DNS de la VPC.
+  - TCP 53 hacia el resolver DNS de la VPC.
+- Regla asociada en el security group del cluster EKS:
+  - TCP 443 desde tfm-app-admin-bastion-sg hacia el plano de control privado de EKS.
 
 ## NAT Gateway
 
@@ -175,7 +190,49 @@ eu-south-2
 - Versionado:
   - No configurado
 - Observación:
-  - El bucket no es público. El acceso debe realizarse desde la aplicación mediante credenciales/políticas IAM.
+  - El bucket no es público. El acceso desde los workloads se realiza mediante roles IAM asociados a ServiceAccounts (IRSA).
+
+### Bucket de artefactos Kubernetes
+- Nombre: tfm-app-k8s-artifacts-296368270177-eu-south-2
+- Región: eu-south-2
+- Uso: almacenamiento temporal de paquetes de manifiestos Kubernetes usados por `Cloud.ps1` para operar el cluster desde el bastion privado.
+- Bloqueo de acceso público:
+  - BlockPublicAcls: true
+  - IgnorePublicAcls: true
+  - BlockPublicPolicy: true
+  - RestrictPublicBuckets: true
+- Cifrado:
+  - SSE-S3 / AES256
+- Ciclo de vida:
+  - Expiración de objetos bajo `manifests/` a los 7 días.
+- Acceso:
+  - Lectura limitada al rol `tfm-app-admin-bastion-role`.
+- Observación:
+  - Se usa como canal controlado para transferir manifiestos al bastion sin exponer el endpoint público de EKS.
+
+### Bucket de logs de CloudTrail
+- Nombre: tfm-app-cloudtrail-296368270177-eu-south-2
+- Región: eu-south-2
+- Uso: almacenamiento de logs de auditoría generados por CloudTrail.
+- Bloqueo de acceso público:
+  - BlockPublicAcls: true
+  - IgnorePublicAcls: true
+  - BlockPublicPolicy: true
+  - RestrictPublicBuckets: true
+- Cifrado:
+  - SSE-S3 / AES256
+- Ownership:
+  - BucketOwnerPreferred
+- Versionado:
+  - Habilitado
+- Ciclo de vida:
+  - Expiración de logs bajo `AWSLogs/` a los 30 días.
+  - Expiración de versiones no actuales a los 30 días.
+- Política de bucket:
+  - Permite `s3:GetBucketAcl` al servicio `cloudtrail.amazonaws.com`.
+  - Permite `s3:PutObject` al servicio `cloudtrail.amazonaws.com` bajo `AWSLogs/296368270177/*`.
+  - Restringe ambas acciones mediante `aws:SourceArn` del trail `tfm-app-zt-audit-trail`.
+  - Exige ACL `bucket-owner-full-control` en escritura.
 
 ## RDS
 
@@ -224,7 +281,7 @@ eu-south-2
   - subnet-0bf6264b0a0ff6873 (tfm-app-subnet-private1-eu-south-2a)
   - subnet-0b2a59812663e59d2 (tfm-app-subnet-private2-eu-south-2b)
 - Acceso al endpoint del cluster:
-  - Público: habilitado
+  - Público: deshabilitado
   - Privado: habilitado
 - Métricas:
   - Desactivadas
@@ -236,8 +293,9 @@ eu-south-2
   - kube-proxy: v1.35.3-eksbuild.2
   - CoreDNS: v1.13.2-eksbuild.4
   - Amazon VPC CNI: v1.21.1-eksbuild.1
+    - NetworkPolicy: habilitado
 - Uso:
-  - Orquestación de los contenedores de la aplicación base.
+  - Orquestación de los contenedores de la aplicación en el entorno Zero Trust.
 
 ### Node group
 - Nombre: tfm-app-ng
@@ -264,30 +322,120 @@ eu-south-2
   - AmazonEC2ContainerRegistryReadOnly
   - AmazonEKS_CNI_Policy
   - AmazonEKSWorkerNodePolicy
-- Política inline asociada al rol de nodos:
-  - tfm-app-node-s3-policy
-- Permisos S3 de la política inline:
-  - s3:ListBucket sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an
-  - s3:GetObject, s3:PutObject, s3:DeleteObject sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an/*
 - Uso:
   - Ejecución de los pods de la aplicación.
+- Observación:
+  - Los permisos S3 de los workloads ya no se concentran en el rol de nodos. Se asignan mediante IRSA a los ServiceAccounts correspondientes.
+
+### Access Entry para bastion de administración
+- Principal: arn:aws:iam::296368270177:role/tfm-app-admin-bastion-role
+- Tipo: STANDARD
+- Política asociada:
+  - AmazonEKSClusterAdminPolicy
+- Alcance:
+  - Cluster completo
+- Uso:
+  - Permitir que el bastion privado administre el cluster EKS mediante el modo de autenticación API de EKS.
+
+## EC2
+
+### Bastion privado de administración
+- ID: i-0af024aa0937d2fbd (ejemplo, el id es variable)
+- Nombre: tfm-app-admin-bastion
+- Tipo de instancia: t3.micro
+- AMI: Amazon Linux 2023 x86_64
+- AMI ID: ami-02b090dacc60230c9
+- AMI name: al2023-ami-2023.12.20260608.0-kernel-6.1-x86_64
+- Subred asociada:
+  - subnet-0bf6264b0a0ff6873 (tfm-app-subnet-private1-eu-south-2a)
+- IP privada: 10.0.129.41
+- IP pública asociada: no
+- Security group:
+  - tfm-app-admin-bastion-sg
+- IAM instance profile:
+  - tfm-app-admin-bastion-profile
+- Metadata options:
+  - IMDS habilitado
+  - IMDSv2 obligatorio
+- Bootstrap:
+  - `infra/terraform/scripts/admin-bastion.sh`
+- Uso:
+  - Ejecutar operaciones administrativas de Kubernetes desde red privada mediante SSM Session Manager.
+  - Descargar artefactos Kubernetes desde el bucket S3 privado `tfm-app-k8s-artifacts-296368270177-eu-south-2`.
+- Observación:
+  - No expone SSH ni reglas de entrada. La administración se realiza mediante SSM.
+
+## CloudTrail
+
+### Trail de auditoría Zero Trust
+- Nombre: tfm-app-zt-audit-trail
+- ARN: arn:aws:cloudtrail:eu-south-2:296368270177:trail/tfm-app-zt-audit-trail
+- Bucket de destino:
+  - tfm-app-cloudtrail-296368270177-eu-south-2
+- Eventos globales de servicios AWS:
+  - Incluidos
+- Trail multi-región:
+  - Habilitado
+- Validación de integridad de logs:
+  - Habilitada
+- Event selector:
+  - Eventos de gestión: incluidos
+  - Tipo lectura/escritura: All
+- Uso:
+  - Registrar actividad de gestión sobre la cuenta AWS como control de auditoría del entorno Zero Trust.
 
 ## IAM
 
-### Usuario IAM para acceso a S3 desde la aplicación
-- Nombre: tfm-app-s3-user
-- ARN: arn:aws:iam::296368270177:user/tfm-app-s3-user
-- Acceso a consola: desactivado
+### Rol IRSA para API
+- Nombre: tfm-app-api-irsa-role
+- ARN: arn:aws:iam::296368270177:role/tfm-app-api-irsa-role
 - Uso:
-  - Generación de access keys utilizadas por la aplicación para acceder al bucket de imágenes.
-  - Las credenciales se almacenan como Secret de Kubernetes en `infra/k8s/secrets.yaml`.
+  - Permitir que el ServiceAccount `tfm-app/api` acceda al bucket de imágenes sin credenciales AWS estáticas.
+- Mecanismo de confianza:
+  - IRSA mediante OIDC provider de EKS.
+- ServiceAccount autorizado:
+  - tfm-app/api
 - Política asociada:
-  - tfm-app-s3-user-policy
+  - tfm-app-api-s3-images-policy
 - Permisos de la política:
   - s3:ListBucket sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an
   - s3:GetObject, s3:PutObject, s3:DeleteObject sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an/*
-- Observación:
-  - Las access keys no se gestionan con Terraform para evitar almacenar secretos en el estado.
+
+### Rol IRSA para SVC
+- Nombre: tfm-app-svc-irsa-role
+- ARN: arn:aws:iam::296368270177:role/tfm-app-svc-irsa-role
+- Uso:
+  - Permitir que el ServiceAccount `tfm-app/svc` acceda al bucket de imágenes sin credenciales AWS estáticas.
+- Mecanismo de confianza:
+  - IRSA mediante OIDC provider de EKS.
+- ServiceAccount autorizado:
+  - tfm-app/svc
+- Política asociada:
+  - tfm-app-svc-s3-images-policy
+- Permisos de la política:
+  - s3:ListBucket sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an
+  - s3:GetObject, s3:PutObject sobre arn:aws:s3:::events-images-296368270177-eu-south-2-an/*
+
+### Rol IAM para bastion privado de administración
+- Nombre: tfm-app-admin-bastion-role
+- ARN: arn:aws:iam::296368270177:role/tfm-app-admin-bastion-role
+- Uso:
+  - Permitir administración privada de EKS desde una instancia EC2 gestionada por SSM.
+- Trust policy:
+  - Servicio EC2 (`ec2.amazonaws.com`).
+- Instance profile:
+  - tfm-app-admin-bastion-profile
+- Políticas asociadas:
+  - AmazonSSMManagedInstanceCore
+  - tfm-app-admin-bastion-eks-policy
+  - tfm-app-admin-bastion-k8s-artifacts-policy
+- Permisos EKS:
+  - eks:DescribeCluster sobre el cluster `tfm-app-eks`.
+- Permisos S3:
+  - s3:ListBucket sobre arn:aws:s3:::tfm-app-k8s-artifacts-296368270177-eu-south-2 limitado al prefijo `manifests/*`.
+  - s3:GetObject sobre arn:aws:s3:::tfm-app-k8s-artifacts-296368270177-eu-south-2/manifests/*
+- Acceso Kubernetes:
+  - Asociado al cluster mediante EKS Access Entry y AmazonEKSClusterAdminPolicy.
 
 ### OIDC Provider de EKS
 - ARN: arn:aws:iam::296368270177:oidc-provider/oidc.eks.eu-south-2.amazonaws.com/id/AEEB296AFF3D3A228A7647FC3C1E89A1
